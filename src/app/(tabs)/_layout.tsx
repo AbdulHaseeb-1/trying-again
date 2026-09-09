@@ -27,7 +27,7 @@ export default function TabsLayout() {
         }),
       }}>
       <Tabs.Screen name="index" options={{ title: 'Pulse' }} />
-      <Tabs.Screen name="news" options={{ title: 'News' }} />
+      <Tabs.Screen name="calendar" options={{ title: 'Calendar' }} />
       <Tabs.Screen name="markets" options={{ title: 'Markets' }} />
       <Tabs.Screen name="derivatives" options={{ title: 'Derivatives' }} />
       <Tabs.Screen name="alerts" options={{ title: 'Alerts' }} />

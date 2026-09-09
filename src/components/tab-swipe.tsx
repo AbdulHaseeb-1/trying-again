@@ -5,11 +5,11 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
-const TAB_ORDER = ['index', 'news', 'markets', 'derivatives', 'alerts'] as const;
+const TAB_ORDER = ['index', 'calendar', 'markets', 'derivatives', 'alerts'] as const;
 
 const TAB_PATHS: Record<(typeof TAB_ORDER)[number], string> = {
   index: '/',
-  news: '/news',
+  calendar: '/calendar',
   markets: '/markets',
   derivatives: '/derivatives',
   alerts: '/alerts',
@@ -35,9 +35,10 @@ export function TabSwipe({ children, style }: { children: ReactNode; style?: Sty
   const translateX = useSharedValue(0);
 
   const index = getTabIndex(pathname);
-  const isAsset = pathname?.startsWith('/asset/') ?? false;
-  const canGoNext = !isAsset && index >= 0 && index < TAB_ORDER.length - 1;
-  const canGoPrev = isAsset || index > 0;
+  // Anything that is not a tab is a pushed detail route: swiping right goes back.
+  const isDetail = index < 0;
+  const canGoNext = !isDetail && index >= 0 && index < TAB_ORDER.length - 1;
+  const canGoPrev = isDetail || index > 0;
 
   // Worklets run on the UI thread, so gesture state lives in SharedValues.
   const canNextSV = useSharedValue(canGoNext);
@@ -52,7 +53,7 @@ export function TabSwipe({ children, style }: { children: ReactNode; style?: Sty
   const pendingNav = useRef<ReturnType<typeof setTimeout> | null>(null);
   const commitRef = useRef((dir: 1 | -1) => {});
   commitRef.current = (dir) => {
-    if (isAsset && dir === -1) {
+    if (isDetail && dir === -1) {
       if (router.canGoBack()) router.back();
       else router.replace('/');
       return;

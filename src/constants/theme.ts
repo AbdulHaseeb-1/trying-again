@@ -19,6 +19,13 @@ export const Colors = {
     negative: '#FF5E6C',
     warning: '#F5B942',
     overlay: 'rgba(0,0,0,0.56)',
+    /** Near-opaque nav-bar fill, standing in for a blur where none is available. */
+    barFill: 'rgba(11,11,12,0.985)',
+    /** Grouped-list card, matching Apple's secondarySystemGroupedBackground. */
+    groupedCard: '#1C1C1E',
+    separator: 'rgba(255,255,255,0.13)',
+    /** Neutral chart fill, readable against the grouped-list card. */
+    neutralBar: 'rgba(255,255,255,0.16)',
     tabIconDefault: '#66727F',
     tabIconSelected: '#29B6F6',
   },

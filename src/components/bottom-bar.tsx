@@ -11,7 +11,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 const tabs: Record<string, { label: string; icon: IconName }> = {
   index: { label: 'Pulse', icon: 'pulse' },
-  news: { label: 'News', icon: 'news' },
+  calendar: { label: 'Calendar', icon: 'calendar' },
   markets: { label: 'Markets', icon: 'markets' },
   derivatives: { label: 'Derivatives', icon: 'derivatives' },
   alerts: { label: 'Alerts', icon: 'alerts' },
@@ -34,7 +34,8 @@ export function BottomBar({ state, descriptors, navigation }: BottomBarProps) {
   const { openAgent } = useAgentPanel();
   const anySheetOpen = useAnySheetOpen();
   const activeRoute = state.routes[state.index];
-  if (activeRoute?.name.startsWith('asset/')) return null;
+  // Detail routes are full-screen pushes with their own back affordance.
+  if (activeRoute?.name.startsWith('asset/') || activeRoute?.name.startsWith('event/')) return null;
   if (anySheetOpen) return null;
 
   const bottom = Math.max(insets.bottom, Spacing.three);
