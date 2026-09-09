@@ -5,11 +5,11 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 
-const TAB_ORDER = ['index', 'news', 'markets', 'derivatives', 'alerts'] as const;
+const TAB_ORDER = ['index', 'calendar', 'markets', 'derivatives', 'alerts'] as const;
 
 const TAB_PATHS: Record<(typeof TAB_ORDER)[number], string> = {
   index: '/',
-  news: '/news',
+  calendar: '/calendar',
   markets: '/markets',
   derivatives: '/derivatives',
   alerts: '/alerts',

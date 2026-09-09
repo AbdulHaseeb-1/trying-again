@@ -23,12 +23,10 @@ export const marketAssets: MarketAsset[] = [
 
 export const tickerAssets = marketAssets.filter((asset) => ['BTC', 'ETH', 'Gold', 'DXY'].includes(asset.symbol));
 
-export const economicEvents = [
-  { country: 'US', title: 'CPI Inflation YoY', time: '18:30', previous: '2.7%', forecast: '2.8%', impact: 'HIGH', countdown: '02h 37m', tone: 'negative' as Tone },
-  { country: 'EU', title: 'ECB Interest Rate Decision', time: '15:15', previous: '2.15%', forecast: '2.15%', impact: 'HIGH', countdown: '23h 22m', tone: 'negative' as Tone },
-  { country: 'US', title: 'Initial Jobless Claims', time: '18:30', previous: '229K', forecast: '231K', impact: 'MEDIUM', countdown: '02h 37m', tone: 'warning' as Tone },
-];
-
+/**
+ * Retained for the AI panel's story-analysis flow, which is wired for news
+ * items even though the calendar replaced the mock news feed.
+ */
 export type NewsItem = {
   id: string;
   time: string;
@@ -38,14 +36,6 @@ export type NewsItem = {
   impact: string;
   tone: Tone;
 };
-
-export const newsItems: NewsItem[] = [
-  { id: 'n1', time: '14:21', category: 'MACRO', headline: 'Dollar softens as traders position ahead of CPI data.', assets: ['USD ↓', 'Gold ↑'], impact: 'HIGH', tone: 'negative' as Tone },
-  { id: 'n2', time: '13:46', category: 'CRYPTO', headline: 'BTC open interest reaches a two-year high as spot demand improves.', assets: ['BTC ↑', 'ETH ↑'], impact: 'MEDIUM', tone: 'warning' as Tone },
-  { id: 'n3', time: '12:58', category: 'FED', headline: 'Officials reiterate a data-dependent path into the next meeting.', assets: ['USD ↔', 'Bonds ↔'], impact: 'MEDIUM', tone: 'warning' as Tone },
-  { id: 'n4', time: '11:32', category: 'GOLD', headline: 'Gold holds firm while real yields drift lower into the release.', assets: ['Gold ↑'], impact: 'LOW', tone: 'positive' as Tone },
-  { id: 'n5', time: '10:41', category: 'STOCKS', headline: 'Nasdaq leads modest risk-on move as megacaps regain momentum.', assets: ['NDX ↑', 'SPX ↑'], impact: 'LOW', tone: 'positive' as Tone },
-];
 
 export const derivativeMetrics = [
   { label: 'Open Interest', value: '$34.2B', change: '+4.8%', tone: 'positive' as Tone },

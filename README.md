@@ -35,6 +35,30 @@ npm run reset-project
 
 This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
+## Economic calendar
+
+The **Calendar** tab is backed by a NestJS service in [`server/`](server) that
+scrapes the ForexFactory economic calendar with Playwright, keeps a rolling
+2-days-back / 7-days-ahead window warm, and polls every 10 seconds around each
+scheduled release until the actual number prints. See
+[`server/README.md`](server/README.md) for the architecture and configuration.
+
+Run it alongside the app:
+
+```bash
+cd server
+npm install && npm run build
+# Chromium has to run headed to clear Cloudflare:
+xvfb-run -a node dist/main.js          # or just `node dist/main.js` with a display
+```
+
+Point the app at it with `EXPO_PUBLIC_CALENDAR_API_URL` (defaults to
+`http://localhost:4000`; a physical device needs the machine's LAN address):
+
+```bash
+EXPO_PUBLIC_CALENDAR_API_URL=http://192.168.1.20:4000 npx expo start
+```
+
 ### Other setup steps
 
 - To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)

@@ -11,7 +11,7 @@ import { useTheme } from '@/hooks/use-theme';
 
 const tabs: Record<string, { label: string; icon: IconName }> = {
   index: { label: 'Pulse', icon: 'pulse' },
-  news: { label: 'News', icon: 'news' },
+  calendar: { label: 'Calendar', icon: 'calendar' },
   markets: { label: 'Markets', icon: 'markets' },
   derivatives: { label: 'Derivatives', icon: 'derivatives' },
   alerts: { label: 'Alerts', icon: 'alerts' },

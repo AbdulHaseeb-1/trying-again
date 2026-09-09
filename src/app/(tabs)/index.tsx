@@ -1,18 +1,20 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { MarketSessionBanner, SessionVariantSheet, WorldClockSheet } from '@/components/market-session';
-import { AppHeader, ImpactBadge, MetricTile, SectionHeader, toneColor } from '@/components/market-ui';
-import { NewsActionSheet } from '@/components/news-actions';
-import { NewsCard } from '@/components/news-item';
+import { AppHeader, MetricTile, SectionHeader } from '@/components/market-ui';
+import { EventRow } from '@/components/calendar/event-row';
+import { NextReleaseCard } from '@/components/calendar/next-release-card';
 import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
-import { derivativeMetrics, marketAssets, newsItems, type NewsItem } from '@/data/market';
+import { impactRank, type CalendarEvent } from '@/data/calendar';
+import { derivativeMetrics, marketAssets } from '@/data/market';
+import { useCalendar, useNow } from '@/hooks/use-calendar';
 import { useAppTheme, useTheme } from '@/hooks/use-theme';
 
 export default function PulseScreen() {
@@ -20,19 +22,34 @@ export default function PulseScreen() {
   const theme = useTheme();
   const { fontScale, setFontScale } = useAppTheme();
   const insets = useSafeAreaInsets();
-  const [refreshing, setRefreshing] = useState(false);
-  const [reminded, setReminded] = useState(false);
+  const [reminders, setReminders] = useState<string[]>([]);
   const [quickSheet, setQuickSheet] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [clockSheetOpen, setClockSheetOpen] = useState(false);
-  const [selectedNews, setSelectedNews] = useState<NewsItem | null>(null);
+
+  const now = useNow();
+  const { data, refreshing, refresh } = useCalendar();
+
+  // The Pulse tab cares about what can actually move a market, so it leads on
+  // the next high-impact print and previews the rest.
+  const upcoming = (data?.events ?? []).filter(
+    (event) => !event.released && new Date(event.scheduledAt).getTime() >= now,
+  );
+  const nextHighImpact =
+    upcoming.find((event) => impactRank(event.impact) >= impactRank('high')) ?? upcoming[0] ?? null;
+  const preview: CalendarEvent[] = upcoming
+    .filter((event) => impactRank(event.impact) >= impactRank('medium'))
+    .slice(0, 4);
+
+  const toggleReminder = (id: string) =>
+    setReminders((current) =>
+      current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
+    );
+
+  const openCalendar = useCallback(() => router.push('/calendar'), [router]);
 
   const openAsset = (symbol: string) => router.push({ pathname: '/asset/[symbol]', params: { symbol } });
-  const refresh = () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 650);
-  };
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -51,7 +68,13 @@ export default function PulseScreen() {
         <View style={styles.heroRow}>
           <View>
             <ThemedText style={styles.title}>Market Pulse</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">September 8, 2026</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {new Date(now).toLocaleDateString(undefined, {
+                month: 'long',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+            </ThemedText>
           </View>
           <View style={[styles.live, { backgroundColor: `${theme.positive}16` }]}>
             <View style={[styles.liveDot, { backgroundColor: theme.positive }]} />
@@ -59,43 +82,27 @@ export default function PulseScreen() {
           </View>
         </View>
 
-        <View style={[styles.eventCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={styles.eventTopline}>
-            <View style={styles.eventTitleRow}>
-              <AppIcon name="calendar" color={theme.textSecondary} />
-              <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>NEXT HIGH IMPACT EVENT</ThemedText>
-            </View>
-            <ImpactBadge impact="HIGH" tone="negative" />
-          </View>
-          <ThemedText style={styles.eventTitle}>US CPI Inflation</ThemedText>
-          <ThemedText style={[styles.countdown, { color: theme.primary }]}>02h 37m</ThemedText>
-          <View style={[styles.eventStats, { borderTopColor: theme.border }]}>
-            <MiniStat label="Previous" value="2.7%" />
-            <MiniStat label="Forecast" value="2.8%" />
-            <Tap
-              accessibilityRole="button"
-              onPress={() => setReminded((current) => !current)}
-              haptic="success"
-              style={[styles.remindButton, { borderColor: reminded ? `${theme.positive}80` : `${theme.primary}90`, backgroundColor: reminded ? `${theme.positive}16` : 'transparent' }]}>
-              <AppIcon name="bell" size={18} color={reminded ? theme.positive : theme.primary} />
-              <ThemedText type="smallBold" style={{ color: reminded ? theme.positive : theme.primary }}>{reminded ? 'Reminder set' : 'Remind me'}</ThemedText>
-            </Tap>
-          </View>
-        </View>
+        {nextHighImpact ? (
+          <NextReleaseCard
+            event={nextHighImpact}
+            now={now}
+            reminded={reminders.includes(nextHighImpact.id)}
+            onToggleReminder={() => toggleReminder(nextHighImpact.id)}
+          />
+        ) : null}
 
-        <View style={[styles.group, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <SectionHeader title="Live news" action="See all" onAction={() => router.push('/news')} />
-          {newsItems.slice(0, 3).map((item, index) => (
-            <NewsCard
-              key={item.id}
-              item={item}
-              variant="compact"
-              isLast={index === 2}
-              onPress={() => setSelectedNews(item)}
-              onLongPress={() => setSelectedNews(item)}
+        {preview.length ? (
+          <View style={[styles.group, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <SectionHeader
+              title="Upcoming releases"
+              action="Calendar"
+              onAction={() => router.push('/calendar')}
             />
-          ))}
-        </View>
+            {preview.map((event) => (
+              <EventRow key={event.id} event={event} onSelect={openCalendar} />
+            ))}
+          </View>
+        ) : null}
 
         <View style={[styles.aiCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={styles.aiIcon}><AppIcon name="sparkles" color={theme.primary} /></View>
@@ -159,13 +166,8 @@ export default function PulseScreen() {
         visible={clockSheetOpen}
         onClose={() => setClockSheetOpen(false)}
       />
-      <NewsActionSheet story={selectedNews} onClose={() => setSelectedNews(null)} />
     </View>
   );
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return <View style={styles.miniStat}><ThemedText type="small" themeColor="textSecondary">{label}</ThemedText><ThemedText style={styles.miniValue}>{value}</ThemedText></View>;
 }
 
 const styles = StyleSheet.create({
@@ -175,22 +177,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 27, lineHeight: 32, fontWeight: '700', letterSpacing: -0.6 },
   live: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: Radius.full, paddingHorizontal: Spacing.two, paddingVertical: 4 },
   liveDot: { width: 6, height: 6, borderRadius: Radius.full },
-  eventCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.lg, padding: Spacing.four, gap: Spacing.three },
-  eventTopline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  eventTitleRow: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
-  eventTitle: { fontSize: 20, lineHeight: 25, fontWeight: '700', letterSpacing: -0.4 },
-  countdown: { fontSize: 38, lineHeight: 44, fontWeight: '700', letterSpacing: -1.2, fontVariant: ['tabular-nums'] },
-  eventStats: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.three, flexDirection: 'row', alignItems: 'flex-end', gap: Spacing.three },
-  miniStat: { gap: 2, minWidth: 56 },
-  miniValue: { fontSize: 18, lineHeight: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  remindButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.two, minHeight: 38, borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.md },
-  group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.lg, paddingHorizontal: Spacing.four, paddingVertical: Spacing.three, gap: Spacing.two },
-  newsRow: { flexDirection: 'row', gap: Spacing.three, paddingVertical: Spacing.three },
-  newsTime: { width: 34, paddingTop: 2, fontVariant: ['tabular-nums'] },
-  newsBody: { flex: 1, gap: 4 },
-  newsMeta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  newsCategory: { fontSize: 10, lineHeight: 13, fontWeight: '800', letterSpacing: 0.8 },
-  newsHeadline: { lineHeight: 19 },
+  group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.lg, paddingHorizontal: Spacing.two, paddingVertical: Spacing.three, gap: Spacing.one },
   sectionGap: { gap: Spacing.three },
   aiCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.three, borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.lg, padding: Spacing.four },
   aiIcon: { width: 32, height: 32, borderRadius: Radius.md, alignItems: 'center', justifyContent: 'center' },
