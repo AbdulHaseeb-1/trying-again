@@ -62,6 +62,19 @@ export const impactRank = (impact: Impact): number => IMPACT_ORDER.indexOf(impac
 /** Currencies the filter row offers, in the order traders scan them. */
 export const CURRENCY_FILTERS = ['USD', 'EUR', 'GBP', 'JPY', 'AUD', 'CAD', 'CHF', 'NZD', 'CNY'] as const;
 
+export const CURRENCY_NAMES: Record<string, string> = {
+  USD: 'US Dollar',
+  EUR: 'Euro',
+  GBP: 'British Pound',
+  JPY: 'Japanese Yen',
+  AUD: 'Australian Dollar',
+  NZD: 'New Zealand Dollar',
+  CAD: 'Canadian Dollar',
+  CHF: 'Swiss Franc',
+  CNY: 'Chinese Yuan',
+  ALL: 'All currencies',
+};
+
 export const IMPACT_FILTERS = [
   { label: 'All', value: null },
   { label: 'Medium+', value: 'medium' as Impact },

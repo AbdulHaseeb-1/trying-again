@@ -28,6 +28,7 @@ export default function RootLayout() {
               <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: Colors.dark.background } }}>
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen name="asset/[symbol]" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="event/[id]" options={{ animation: 'slide_from_right' }} />
               </Stack>
             </SafeAreaView>
           </AgentProvider>

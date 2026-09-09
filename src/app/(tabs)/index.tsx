@@ -48,6 +48,10 @@ export default function PulseScreen() {
     );
 
   const openCalendar = useCallback(() => router.push('/calendar'), [router]);
+  const openEvent = useCallback(
+    (event: CalendarEvent) => router.push(`/event/${event.id}`),
+    [router],
+  );
 
   const openAsset = (symbol: string) => router.push({ pathname: '/asset/[symbol]', params: { symbol } });
 
@@ -96,10 +100,10 @@ export default function PulseScreen() {
             <SectionHeader
               title="Upcoming releases"
               action="Calendar"
-              onAction={() => router.push('/calendar')}
+              onAction={openCalendar}
             />
             {preview.map((event) => (
-              <EventRow key={event.id} event={event} onSelect={openCalendar} />
+              <EventRow key={event.id} event={event} onSelect={openEvent} />
             ))}
           </View>
         ) : null}
