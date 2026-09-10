@@ -15,6 +15,7 @@ import {
 } from 'cockatiel';
 
 import { derivativesConfig } from '../config/configuration';
+import { DerivativesArchive, type ArchiveReport } from './derivatives.archive';
 import { DerivativesSnapshotStore } from './derivatives.snapshot';
 import { DerivativesStore } from './derivatives.store';
 import type {
@@ -40,12 +41,14 @@ export class DerivativesService {
   private readonly logger = new Logger(DerivativesService.name);
   private readonly policy: IPolicy;
   private inFlight: Promise<SyncOutcome> | null = null;
-  private history: SyncOutcome[] = [];
+  private syncs: SyncOutcome[] = [];
   private restoredAt: string | null = null;
+  private lastArchive: ArchiveReport | null = null;
 
   constructor(
     private readonly store: DerivativesStore,
     private readonly snapshot: DerivativesSnapshotStore,
+    private readonly archive: DerivativesArchive,
     private readonly scraper: CoinglassScraper,
     private readonly events: EventEmitter2,
     @Inject(derivativesConfig.KEY)
@@ -90,6 +93,9 @@ export class DerivativesService {
       const snapshot = await this.policy.execute(() => this.scraper.fetch(assets));
       const report = this.store.merge(snapshot);
       void this.snapshot.save(this.store.toSnapshot());
+      // Fire-and-forget: the archive is history, and history can wait. What it
+      // writes is only what this scrape had not already stored.
+      void this.archive.persist(snapshot).then((written) => this.recordArchive(written));
 
       const outcome: SyncOutcome = {
         trigger,
@@ -139,7 +145,42 @@ export class DerivativesService {
   }
 
   private record(outcome: SyncOutcome): void {
-    this.history = [outcome, ...this.history].slice(0, 20);
+    this.syncs = [outcome, ...this.syncs].slice(0, 20);
+  }
+
+  private recordArchive(report: ArchiveReport): void {
+    this.lastArchive = report;
+    const written = Object.values(report).reduce((total, count) => total + count, 0);
+    if (written > 0) {
+      this.logger.debug(
+        `archived ${written} rows (${Object.entries(report)
+          .filter(([, count]) => count > 0)
+          .map(([table, count]) => `${table}: ${count}`)
+          .join(', ')})`,
+      );
+    }
+  }
+
+  /** History from the archive, one series at a time. */
+  history(series: Parameters<DerivativesArchive['history']>[0], query: Parameters<DerivativesArchive['history']>[1]) {
+    return this.archive.history(series, query);
+  }
+
+  archiveSummary() {
+    return this.archive.summary();
+  }
+
+  pruneArchive() {
+    return this.archive.prune();
+  }
+
+  get archiveEnabled(): boolean {
+    return this.archive.enabled;
+  }
+
+  /** What the last sync actually wrote to the archive. */
+  get lastArchived(): ArchiveReport | null {
+    return this.lastArchive;
   }
 
   asset(symbol: string): AssetDerivatives | null {
@@ -167,11 +208,11 @@ export class DerivativesService {
   }
 
   get lastSync(): SyncOutcome | null {
-    return this.history[0] ?? null;
+    return this.syncs[0] ?? null;
   }
 
   get recentSyncs(): SyncOutcome[] {
-    return this.history;
+    return this.syncs;
   }
 
   get capturedAt(): string | null {

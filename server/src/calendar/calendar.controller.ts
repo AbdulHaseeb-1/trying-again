@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Inject, Post, Query, Sse } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Post,
+  Query,
+  ServiceUnavailableException,
+  Sse,
+} from '@nestjs/common';
 import { ConfigType } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -7,6 +16,7 @@ import { fromEvent, map, merge, startWith, type Observable } from 'rxjs';
 import { calendarConfig } from '../config/configuration';
 import { CalendarScheduler } from './calendar.scheduler';
 import { CALENDAR_RELEASED, CALENDAR_SYNCED, CalendarService } from './calendar.service';
+import { CalendarHistoryDto } from './dto/calendar-history.dto';
 import { CalendarQueryDto } from './dto/calendar-query.dto';
 import { RefreshConfigDto } from './dto/refresh-config.dto';
 import type { CalendarEvent } from './calendar.types';
@@ -39,6 +49,8 @@ export class CalendarController {
       lastChangedAt: this.calendar.changedAt,
       snapshotCapturedAt: this.calendar.snapshotCapturedAt,
       refreshIntervalMs: this.scheduler.refreshIntervalMs,
+      /** So a client knows whether asking for history is worth the round trip. */
+      archiveEnabled: this.calendar.archiveEnabled,
       nextRelease: this.calendar.nextRelease(),
       count: events.length,
       days: this.groupByDay(events),
@@ -52,11 +64,34 @@ export class CalendarController {
     return { nextRelease: this.calendar.nextRelease(query.minImpact) };
   }
 
+  @Get('history')
+  @ApiOperation({
+    summary: 'Past releases from the archive, including everything older than the live window.',
+  })
+  @ApiOkResponse({ description: 'Stored events, oldest first.' })
+  async history(@Query() query: CalendarHistoryDto) {
+    if (!this.calendar.archiveEnabled) {
+      throw new ServiceUnavailableException(
+        'History needs the Postgres archive; set DATABASE_URL and run the migrations.',
+      );
+    }
+    const events = await this.calendar.archiveHistory(query);
+    return {
+      range: { from: query.from?.toISOString() ?? null, to: query.to?.toISOString() ?? null },
+      count: events.length,
+      events,
+    };
+  }
+
   @Get('status')
   @ApiOperation({ summary: 'Pipeline health: sources, sync history and armed release watches.' })
-  status() {
+  async status() {
     return {
       now: new Date().toISOString(),
+      archive: {
+        enabled: this.calendar.archiveEnabled,
+        ...((await this.calendar.archiveSummary()) ?? {}),
+      },
       events: this.calendar.count,
       sources: this.calendar.sourceNames,
       snapshotCapturedAt: this.calendar.snapshotCapturedAt,

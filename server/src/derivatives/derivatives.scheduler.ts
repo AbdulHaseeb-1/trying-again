@@ -6,6 +6,8 @@ import { derivativesConfig } from '../config/configuration';
 import { DerivativesService } from './derivatives.service';
 
 const BASE_INTERVAL = 'derivatives:base-refresh';
+const PRUNE_INTERVAL = 'derivatives:archive-prune';
+const PRUNE_EVERY_MS = 24 * 60 * 60_000;
 
 /**
  * The refresh loop.
@@ -32,6 +34,7 @@ export class DerivativesScheduler implements OnApplicationBootstrap, OnModuleDes
       return 0;
     });
     this.startBaseLoop();
+    this.startPruneLoop();
     if (this.config.refreshOnBoot) {
       await this.derivatives.sync('boot').catch((error) => {
         this.logger.error(`boot sync failed: ${error}`);
@@ -41,6 +44,31 @@ export class DerivativesScheduler implements OnApplicationBootstrap, OnModuleDes
 
   onModuleDestroy(): void {
     this.clearBaseLoop();
+    this.clearInterval(PRUNE_INTERVAL);
+  }
+
+  /**
+   * Retention. Sampled rows accumulate forever otherwise — the liquidation feed
+   * alone is tens of thousands of rows a day — so anything past the horizon is
+   * dropped once a day. Series with a natural key (funding intervals, the price
+   * series) are left alone: they are the history worth keeping.
+   */
+  private startPruneLoop(): void {
+    if (!this.derivatives.archiveEnabled) return;
+    this.clearInterval(PRUNE_INTERVAL);
+    const interval = setInterval(() => {
+      void this.derivatives.pruneArchive().catch((error) => {
+        this.logger.warn(`archive prune failed: ${error}`);
+      });
+    }, PRUNE_EVERY_MS);
+    interval.unref?.();
+    this.registry.addInterval(PRUNE_INTERVAL, interval);
+  }
+
+  private clearInterval(name: string): void {
+    if (!this.registry.doesExist('interval', name)) return;
+    clearInterval(this.registry.getInterval(name));
+    this.registry.deleteInterval(name);
   }
 
   private startBaseLoop(): void {
@@ -55,9 +83,7 @@ export class DerivativesScheduler implements OnApplicationBootstrap, OnModuleDes
   }
 
   private clearBaseLoop(): void {
-    if (!this.registry.doesExist('interval', BASE_INTERVAL)) return;
-    clearInterval(this.registry.getInterval(BASE_INTERVAL));
-    this.registry.deleteInterval(BASE_INTERVAL);
+    this.clearInterval(BASE_INTERVAL);
   }
 
   /** Change the cadence at runtime; used by the admin endpoint. */

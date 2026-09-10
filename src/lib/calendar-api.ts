@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-import type { CalendarResponse } from '@/data/calendar';
+import type { CalendarHistoryResponse, CalendarResponse } from '@/data/calendar';
 
 /**
  * Base URL of the calendar service.
@@ -46,6 +46,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchCalendar(signal?: AbortSignal): Promise<CalendarResponse> {
   return request<CalendarResponse>('/api/calendar', { signal });
+}
+
+/**
+ * Past releases, out of the service's Postgres archive rather than a scrape.
+ * Answers 503 when the service is running without one.
+ */
+export function fetchCalendarHistory(
+  params: { from: Date; to: Date; limit?: number },
+  signal?: AbortSignal,
+): Promise<CalendarHistoryResponse> {
+  const query = new URLSearchParams({
+    from: params.from.toISOString(),
+    to: params.to.toISOString(),
+    limit: String(params.limit ?? 500),
+  });
+  return request<CalendarHistoryResponse>(`/api/calendar/history?${query}`, { signal });
 }
 
 /** Ask the service to scrape now instead of waiting for its interval. */

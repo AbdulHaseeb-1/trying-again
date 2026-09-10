@@ -9,6 +9,11 @@ export type MergeReport = {
   removed: number;
   /** Ids of events that gained an `actual` value in this merge. */
   released: string[];
+  /**
+   * The rows this merge actually wrote. The archive persists these and nothing
+   * else, so a sync that re-read the same numbers writes nothing at all.
+   */
+  changed: CalendarEvent[];
 };
 
 /**
@@ -31,7 +36,7 @@ export class CalendarStore {
    * out of that source's reach and must be left alone.
    */
   merge(incoming: CalendarEvent[], coveredWindow: FetchWindow, sourceName?: SourceName): MergeReport {
-    const report: MergeReport = { added: 0, updated: 0, removed: 0, released: [] };
+    const report: MergeReport = { added: 0, updated: 0, removed: 0, released: [], changed: [] };
     const seen = new Set<string>();
 
     for (const event of incoming) {
@@ -40,6 +45,7 @@ export class CalendarStore {
       if (!stored) {
         this.events.set(event.id, event);
         report.added += 1;
+        report.changed.push(event);
         if (event.released) report.released.push(event.id);
         continue;
       }
@@ -49,6 +55,7 @@ export class CalendarStore {
 
       this.events.set(event.id, merged);
       report.updated += 1;
+      report.changed.push(merged);
       if (!stored.actual && merged.actual) report.released.push(event.id);
     }
 

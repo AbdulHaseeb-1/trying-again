@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { BrowserModule } from '../browser/browser.module';
+import { DerivativesArchive } from './derivatives.archive';
 import { DerivativesController } from './derivatives.controller';
 import { DerivativesScheduler } from './derivatives.scheduler';
 import { DerivativesService } from './derivatives.service';
@@ -12,6 +13,7 @@ import { CoinglassScraper } from './sources/coinglass.scraper';
   imports: [BrowserModule],
   controllers: [DerivativesController],
   providers: [
+    DerivativesArchive,
     DerivativesService,
     DerivativesStore,
     DerivativesSnapshotStore,

@@ -17,12 +17,23 @@ const noopSource = { name: 'forex-factory-scrape', priority: 0, fetch: async () 
   throw new Error('unused');
 } };
 
-const build = (events: CalendarEvent[]) => {
+const stubArchive = (overrides: Record<string, unknown> = {}) => ({
+  enabled: false,
+  persist: async () => 0,
+  markReleased: async () => undefined,
+  query: async () => [],
+  summary: async () => null,
+  ...overrides,
+});
+
+const build = (events: CalendarEvent[], parts: { archive?: unknown; snapshot?: unknown } = {}) => {
   const store = new CalendarStore();
   store.hydrate(events);
   const service = new CalendarService(
     store,
-    { load: async () => null, save: async () => undefined } as never,
+    (parts.snapshot ?? { load: async () => null, save: async () => undefined }) as never,
+    // No archive by default: the service must work without Postgres.
+    (parts.archive ?? stubArchive()) as never,
     { emit: () => true } as never,
     noopSource as never,
     noopSource as never,
@@ -105,4 +116,65 @@ test('query filters by currency, impact and window', () => {
     'usd-high',
   ]);
   assert.equal(service.query({ from: new Date(Date.now() + 3_600_000) }).length, 0);
+});
+
+test('restore merges the archive with the file snapshot and backfills the gap', async () => {
+  const archived = event({
+    id: 'archived',
+    title: 'Archived print',
+    scheduledAt: new Date(Date.now() - 3_600_000).toISOString(),
+    actual: '2.9%',
+    released: true,
+  });
+  const onlyInFile = event({
+    id: 'from-file',
+    title: 'Snapshot only',
+    scheduledAt: new Date(Date.now() + 3_600_000).toISOString(),
+  });
+
+  const persisted: CalendarEvent[][] = [];
+  const service = build([], {
+    archive: stubArchive({
+      enabled: true,
+      query: async () => [archived],
+      persist: async (events: CalendarEvent[]) => {
+        persisted.push(events);
+        return events.length;
+      },
+    }),
+    snapshot: {
+      // The file is behind: it has an event the archive never saw, and a stale
+      // copy of one the archive already holds.
+      load: async () => ({
+        capturedAt: new Date().toISOString(),
+        source: 'forex-factory-feed',
+        events: [onlyInFile, { ...archived, actual: null, released: false }],
+      }),
+      save: async () => undefined,
+    },
+  });
+
+  const restored = await service.restore();
+  assert.equal(restored, 2, 'both sources contribute, neither duplicates the other');
+
+  const stored = service.query().find((entry) => entry.id === 'archived');
+  assert.equal(stored?.actual, '2.9%', 'the archived copy wins over the stale snapshot copy');
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    persisted.flat().map((entry) => entry.id),
+    ['from-file'],
+    'only the event the archive was missing gets written back',
+  );
+});
+
+test('restore without an archive still comes up from the file', async () => {
+  const upcoming = event({ id: 'file-only', scheduledAt: new Date(Date.now() + 60_000).toISOString() });
+  const service = build([], {
+    snapshot: {
+      load: async () => ({ capturedAt: new Date().toISOString(), source: 'seed', events: [upcoming] }),
+      save: async () => undefined,
+    },
+  });
+  assert.equal(await service.restore(), 1);
 });

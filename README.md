@@ -49,12 +49,20 @@ See [`server/README.md`](server/README.md) for the architecture and configuratio
   encrypts its API payloads and decodes them in the browser, so the scraper
   loads the page and harvests what the page itself decoded rather than parsing
   the DOM.
+- **History** — an optional Postgres archive (Prisma) behind both. Each sync
+  writes only what it had not already stored, so the past accumulates without
+  being rewritten, and past releases come back out of the database instead of
+  being scraped again. The service runs fine without it.
 
 Run it alongside the app:
 
 ```bash
 cd server
 npm install && npm run build
+
+# Optional, for history: Postgres plus the Prisma migrations.
+docker compose up -d && cp .env.example .env && npm run prisma:migrate
+
 # Chromium has to run headed to clear ForexFactory's Cloudflare check:
 xvfb-run -a node dist/main.js          # or just `node dist/main.js` with a display
 ```

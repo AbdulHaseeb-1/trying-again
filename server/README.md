@@ -6,12 +6,15 @@ the [ForexFactory][ff] economic calendar, and [CoinGlass][cg] derivatives.
 Both pipelines share the same shape — sources behind a timeout and a circuit
 breaker, an in-memory store that only ever advances, a last-known-good snapshot
 on disk, and an SSE stream so clients hear about a change instead of polling for
-it.
+it. Behind both sits an optional Postgres archive that remembers what the live
+window has already forgotten.
 
 - [The calendar](#the-calendar) — 2 days back, 7 days ahead, burst-polled around
   every release.
 - [Derivatives](#derivatives) — open interest, funding, liquidations and
   positioning per coin and per venue, refreshed every minute.
+- [The archive](#the-archive) — Prisma and Postgres: history, written
+  incrementally and read back without scraping again.
 
 # The calendar
 
@@ -29,6 +32,9 @@ it.
 ```bash
 npm install
 npm run build
+
+# Optional: Postgres for history (see "The archive" below).
+docker compose up -d && npm run prisma:migrate
 
 # Chromium must run headed to clear Cloudflare — on a server, under Xvfb:
 xvfb-run -a --server-args="-screen 0 1440x1000x24" node dist/main.js
@@ -48,6 +54,7 @@ the machine has no display.
 | `GET`  | `/api/calendar/status`  | Sources, sync history, and every armed release watch |
 | `POST` | `/api/calendar/refresh` | Fetch now, bypassing the interval |
 | `POST` | `/api/calendar/config`  | Retune `refreshIntervalMs` / `watchPollIntervalMs` live |
+| `GET`  | `/api/calendar/history` | Past releases from the archive, including everything older than the window |
 | `GET`  | `/api/calendar/stream`  | SSE stream of `sync` and `release` events |
 
 `GET /api/calendar` accepts `from`, `to`, `currencies` (`USD,EUR`) and
@@ -154,6 +161,7 @@ market-wide screener of ~1,000 coins.
 | `GET`  | `/api/derivatives/status`   | Which pages answered, sync history, cadence |
 | `POST` | `/api/derivatives/refresh`  | Scrape now, bypassing the interval |
 | `POST` | `/api/derivatives/config`   | Retune `refreshIntervalMs` live |
+| `GET`  | `/api/derivatives/history`  | One archived series (`?series=asset\|venues\|funding\|prices\|liquidations\|market\|coins`) |
 | `GET`  | `/api/derivatives/stream`   | SSE stream of `sync` events |
 
 ## How the data gets in
@@ -221,10 +229,89 @@ npx tsx scripts/scrape-coinglass.ts seed/derivatives-snapshot.json BTC,ETH,SOL
 | `COINGLASS_SETTLE_QUIET_MS` | `2500` | Quiet gap that ends a page early |
 | `COINGLASS_MAX_ORDERS` / `_SCREENER_ROWS` / `_SERIES_POINTS` | `60` / `100` / `240` | Caps on the firehose endpoints |
 
+# The archive
+
+Postgres, through [Prisma][pr]. The live window is what the app polls; this is
+where everything that has already happened goes — the calendar after an event
+scrolls out of the two-day window, and the derivatives series that CoinGlass
+only ever serves as a short tail.
+
+It is **optional**. With no `DATABASE_URL` the scrapers, the in-memory window
+and the file snapshots all work exactly as before, `/status` reports the archive
+as off, and the history endpoints answer `503` with the reason rather than an
+empty list that looks like an answer.
+
+## Setting it up
+
+```bash
+docker compose up -d          # or any Postgres you already have
+cp .env.example .env          # DATABASE_URL lives here
+npm run prisma:migrate        # create the tables
+```
+
+`npm install` runs `prisma generate` for you; `npm run prisma:deploy` is the
+non-interactive migration for deployments, and `npm run prisma:studio` opens a
+browser over the data.
+
+## What goes in, and when
+
+Writes are incremental in two different ways, because the data arrives two
+different ways:
+
+**Series that carry their own identity** — calendar events, funding intervals,
+the price series, the liquidation feed — are keyed by that identity: an event
+id, a `(symbol, timestamp)` pair, or, for a liquidation, the order itself
+(venue, contract, instant, size — CoinGlass ships no id). Every scrape re-offers
+its whole tail and the unique key rejects what is already stored, so a minute's
+scrape of 240 unchanged funding candles writes nothing. The calendar goes
+further and writes only the rows a sync actually *changed*, so a re-read of the
+same numbers touches no rows at all.
+
+**Series that exist only because we looked** — the coin totals, the venue table,
+the market snapshot — have no natural key: every sync is a new observation at a
+new instant. Storing one per 60-second scrape would be a quarter of a million
+venue rows a day without adding information, so they are sampled on their own
+interval (`DERIVATIVES_HISTORY_INTERVAL_MS`, five minutes by default) and pruned
+past `DERIVATIVES_ARCHIVE_RETENTION_DAYS`. The keyed series are never pruned —
+they are the history worth keeping.
+
+Archiving is fire-and-forget in both pipelines: a database that is slow, full or
+down logs a warning and never fails a sync, because the live scrape is the part
+users are watching.
+
+## What comes back out
+
+On boot the calendar reads the archive *and* the file snapshot and merges them:
+the archive holds everything ever seen, a fresh database holds nothing, and the
+file is all that stands between a first run and an empty screen. Where both know
+an event the stored copy wins, and anything the file knew that the archive did
+not is written back, so the two converge instead of drifting.
+
+`GET /api/calendar/history` then serves the past — filtered by range, currency,
+impact, and optionally only what has printed — from Postgres rather than from a
+scrape. `GET /api/derivatives/history` does the same for the seven derivative
+series, filtered by symbol, venue and range.
+
+## Tables
+
+| Table | What it holds | Keyed by |
+| ----- | ------------- | -------- |
+| `calendar_event` | Every release seen, with the moment it printed | event id |
+| `asset_snapshot` | A coin's derivatives market at one instant | sampled |
+| `venue_snapshot` | One contract on one venue at one instant | sampled |
+| `market_snapshot` | Whole-market totals | sampled |
+| `coin_snapshot` | Screener rows over time | sampled |
+| `funding_point` | Funding intervals | `(symbol, at)` |
+| `price_point` | Price series | `(symbol, at)` |
+| `liquidation_order` | The live liquidation feed | the order's own fingerprint |
+
 # Tests
 
 ```bash
 npm test
+
+# Archive tests against a real database (a scratch one — it truncates tables):
+TEST_DATABASE_URL=postgresql://…/marketpulse_test npm test
 ```
 
 For the calendar: identity and merge rules (including the "never un-release a
@@ -237,6 +324,12 @@ be recognised), the mapper's coercion and the contradictions it works around,
 and the store's guarantee that a partial run never blanks an asset an earlier
 run captured.
 
+For the archive: what each pipeline decides to write and when — against a fake
+client for the decisions, and against a real Postgres (opt-in, via
+`TEST_DATABASE_URL`) for the promise only a database can keep, that re-offering
+stored rows collapses into the rows already there.
+
 [ff]: https://www.forexfactory.com/calendar
 [cg]: https://www.coinglass.com
+[pr]: https://www.prisma.io
 [ck]: https://github.com/connor4312/cockatiel

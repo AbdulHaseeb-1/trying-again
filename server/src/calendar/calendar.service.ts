@@ -15,6 +15,7 @@ import {
 } from 'cockatiel';
 
 import { calendarConfig } from '../config/configuration';
+import { CalendarArchive } from './calendar.archive';
 import { CalendarSnapshot } from './calendar.snapshot';
 import { CalendarStore } from './calendar.store';
 import type {
@@ -57,6 +58,7 @@ export class CalendarService {
   constructor(
     private readonly store: CalendarStore,
     private readonly snapshot: CalendarSnapshot,
+    private readonly archive: CalendarArchive,
     private readonly events: EventEmitter2,
     scraper: ForexFactoryScraper,
     feed: ForexFactoryFeed,
@@ -85,19 +87,77 @@ export class CalendarService {
   }
 
   /**
-   * Seed the store from the last persisted scrape so the app is populated
-   * before the first live fetch returns — and stays populated if it fails.
+   * Seed the store so the app is populated before the first live fetch returns
+   * — and stays populated if it fails.
+   *
+   * Both sources are read and merged rather than one being preferred: the
+   * archive holds everything this service has ever seen, but a fresh database
+   * holds nothing, and the file snapshot is the only thing standing between a
+   * first run and an empty screen. Whichever knows about an event wins for that
+   * event, and anything the file knew that the archive did not is written back,
+   * so the two converge instead of drifting.
    */
   async restore(): Promise<number> {
-    const snapshot = await this.snapshot.load();
-    if (!snapshot) return 0;
     const window = this.window();
-    const inWindow = snapshot.events.filter((event) => {
+    const inWindow = (event: CalendarEvent): boolean => {
       const at = new Date(event.scheduledAt).getTime();
       return at >= window.from.getTime() && at <= window.to.getTime();
+    };
+
+    const stored = this.archive.enabled
+      ? await this.archive.query({ from: window.from, to: window.to, limit: 5_000 }).catch((error) => {
+          this.logger.warn(`archive restore failed: ${error}`);
+          return [] as CalendarEvent[];
+        })
+      : [];
+
+    const snapshot = await this.snapshot.load();
+    const fromFile = (snapshot?.events ?? []).filter(inWindow);
+
+    if (!stored.length && !fromFile.length) return 0;
+
+    // The archive is hydrated first, so where both know an event the stored
+    // copy — which has been through every merge rule — is the one kept.
+    this.store.hydrate(stored);
+    const size = this.store.hydrate(fromFile);
+
+    const known = new Set(stored.map((event) => event.id));
+    const missing = fromFile.filter((event) => !known.has(event.id));
+    if (missing.length) void this.archive.persist(missing);
+
+    this.restoredAt =
+      stored.reduce<string | null>(
+        (latest, event) => (!latest || event.updatedAt > latest ? event.updatedAt : latest),
+        null,
+      ) ?? snapshot?.capturedAt ?? null;
+
+    this.logger.log(
+      this.archive.enabled
+        ? `restored ${size} events (${stored.length} archived, ${missing.length} backfilled from the snapshot)`
+        : `restored ${size} events from the snapshot`,
+    );
+    return size;
+  }
+
+  /** History from the archive: everything that has fallen out of the window. */
+  archiveHistory(query: CalendarQuery & { releasedOnly?: boolean; limit?: number } = {}) {
+    return this.archive.query({
+      from: query.from,
+      to: query.to,
+      currencies: query.currencies,
+      minImpact: query.minImpact,
+      releasedOnly: query.releasedOnly,
+      limit: query.limit,
     });
-    this.restoredAt = snapshot.capturedAt;
-    return this.store.hydrate(inWindow);
+  }
+
+  /** Whether history is available at all, and what it holds. */
+  archiveSummary() {
+    return this.archive.summary();
+  }
+
+  get archiveEnabled(): boolean {
+    return this.archive.enabled;
   }
 
   /** The rolling window the product asks for: N days back, M days forward. */
@@ -146,6 +206,11 @@ export class CalendarService {
           source: result.source,
           events: this.store.all(),
         });
+        // Only the rows that changed, so a sync that re-read the same numbers
+        // touches nothing. Fire-and-forget: the archive never gates a sync.
+        void this.archive
+          .persist(report.changed)
+          .then(() => this.archive.markReleased(report.released));
 
         const outcome: SyncOutcome = {
           trigger,

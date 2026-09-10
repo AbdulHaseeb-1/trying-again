@@ -34,7 +34,20 @@ export default function CalendarScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const now = useNow();
-  const { data, error, loading, refreshing, live, refresh } = useCalendar();
+  const {
+    data,
+    error,
+    loading,
+    refreshing,
+    live,
+    refresh,
+    history,
+    loadingHistory,
+    historyError,
+    historyExhausted,
+    canLoadEarlier,
+    loadEarlier,
+  } = useCalendar();
 
   const [filters, setFilters] = useState<CalendarFilterState>(EMPTY_FILTERS);
   const [reminders, setReminders] = useState<string[]>([]);
@@ -46,12 +59,14 @@ export default function CalendarScreen() {
 
   const events = useMemo(() => {
     if (!data) return [];
-    return data.events.filter((event) => {
+    // History sits in front of the live window; the two never overlap, since
+    // each page is fetched strictly before what is already loaded.
+    return [...history, ...data.events].filter((event) => {
       if (filters.minImpact && impactRank(event.impact) < impactRank(filters.minImpact)) return false;
       if (filters.currencies.length && !filters.currencies.includes(event.currency)) return false;
       return true;
     });
-  }, [data, filters]);
+  }, [data, history, filters]);
 
   // Group in the device's timezone so "Today" matches the user's day, not UTC's.
   const sections = useMemo(() => {
@@ -129,6 +144,17 @@ export default function CalendarScreen() {
             ) : null}
 
             <CalendarFilters value={filters} onChange={setFilters} />
+
+            {data ? (
+              <LoadEarlier
+                available={canLoadEarlier}
+                loading={loadingHistory}
+                error={historyError}
+                exhausted={historyExhausted}
+                loaded={history.length}
+                onPress={loadEarlier}
+              />
+            ) : null}
           </View>
         }
         renderSectionHeader={({ section }) => (
@@ -162,6 +188,67 @@ export default function CalendarScreen() {
         />
       </View>
 
+    </View>
+  );
+}
+
+/**
+ * The way into the archive.
+ *
+ * The live window only reaches two days back — everything before that is in the
+ * service's database, and this is the one control that asks for it. It stays
+ * visible but inert when the service is running without an archive, because
+ * "there is no history here" is a more useful answer than a button that does
+ * nothing.
+ */
+function LoadEarlier({
+  available,
+  loading,
+  error,
+  exhausted,
+  loaded,
+  onPress,
+}: {
+  available: boolean;
+  loading: boolean;
+  error: string | null;
+  exhausted: boolean;
+  loaded: number;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  if (!available && !error) return null;
+  const done = exhausted && !loading;
+
+  return (
+    <View style={styles.earlier}>
+      <Tap
+        accessibilityRole="button"
+        accessibilityLabel="Load earlier releases"
+        accessibilityState={{ disabled: loading }}
+        onPress={loading || done ? undefined : onPress}
+        haptic="none"
+        style={[styles.earlierButton, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+        <AppIcon name="clock" size={14} color={theme.textSecondary} />
+        <ThemedText type="smallBold" themeColor={loading || done ? 'textMuted' : 'text'}>
+          {loading ? 'Loading history…' : 'Load earlier releases'}
+        </ThemedText>
+      </Tap>
+      {loaded > 0 && !loading ? (
+        <ThemedText type="small" themeColor="textMuted">
+          {loaded} past {loaded === 1 ? 'release' : 'releases'} from the archive
+        </ThemedText>
+      ) : null}
+      {done ? (
+        <ThemedText type="small" themeColor="textMuted">
+          {loaded > 0 ? 'That is everything the archive holds.' : 'Nothing older in the archive yet.'}
+        </ThemedText>
+      ) : null}
+      {error ? (
+        <ThemedText type="small" style={{ color: theme.warning }}>
+          {error}
+        </ThemedText>
+      ) : null}
     </View>
   );
 }
@@ -225,6 +312,16 @@ const styles = StyleSheet.create({
   errorText: { flex: 1, fontSize: 12, lineHeight: 16 },
   errorAction: { paddingHorizontal: Spacing.two, paddingVertical: Spacing.one },
   empty: { paddingHorizontal: Spacing.three, paddingTop: Spacing.six },
+  earlier: { alignItems: 'center', gap: Spacing.one, paddingTop: Spacing.two },
+  earlierButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    paddingHorizontal: Spacing.four,
+    minHeight: 34,
+    borderRadius: Radius.full,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   skeleton: {
     gap: Spacing.two,
     padding: Spacing.four,

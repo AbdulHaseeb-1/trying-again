@@ -4,10 +4,11 @@ import { Platform } from 'react-native';
 import {
   calendarStreamUrl,
   fetchCalendar,
+  fetchCalendarHistory,
   requestRefresh,
   CalendarApiError,
 } from '@/lib/calendar-api';
-import type { CalendarResponse } from '@/data/calendar';
+import type { CalendarEvent, CalendarResponse } from '@/data/calendar';
 
 export type CalendarState = {
   data: CalendarResponse | null;
@@ -17,9 +18,20 @@ export type CalendarState = {
   /** True while the service is inside a release burst, so the UI can say so. */
   live: boolean;
   refresh: () => Promise<void>;
+  /** Past releases pulled from the archive, oldest first. */
+  history: CalendarEvent[];
+  loadingHistory: boolean;
+  historyError: string | null;
+  /** True once a page came back empty: the archive goes no further back. */
+  historyExhausted: boolean;
+  /** False when the service has no archive to ask. */
+  canLoadEarlier: boolean;
+  loadEarlier: () => Promise<void>;
 };
 
 const DEFAULT_POLL_MS = 60_000;
+/** How far back one tap reaches. */
+const HISTORY_STEP_DAYS = 7;
 
 /**
  * Keeps the screen in step with the service.
@@ -100,6 +112,49 @@ export function useCalendar(): CalendarState {
     };
   }, [load]);
 
+  // Past releases live in the service's Postgres archive, not in the live
+  // window, so they are fetched on demand and kept beside it rather than
+  // merged into it — the window keeps refreshing underneath, and history does
+  // not change.
+  const [history, setHistory] = useState<CalendarEvent[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyExhausted, setHistoryExhausted] = useState(false);
+
+  const earliestLoaded = history[0]?.scheduledAt ?? data?.window.from ?? null;
+
+  const loadEarlier = useCallback(async () => {
+    if (!earliestLoaded || loadingHistory) return;
+    setLoadingHistory(true);
+    setHistoryError(null);
+    try {
+      const to = new Date(new Date(earliestLoaded).getTime() - 1);
+      const from = new Date(to.getTime() - HISTORY_STEP_DAYS * 86_400_000);
+      const page = await fetchCalendarHistory({ from, to });
+      if (!mounted.current) return;
+      // An empty page means the archive has nothing older — which is the usual
+      // answer on a young database, and worth saying rather than leaving a
+      // button that appears to do nothing.
+      if (page.events.length === 0) setHistoryExhausted(true);
+      setHistory((current) => {
+        const seen = new Set(current.map((event) => event.id));
+        const merged = [...page.events.filter((event) => !seen.has(event.id)), ...current];
+        return merged.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+      });
+    } catch (cause) {
+      if (!mounted.current) return;
+      setHistoryError(
+        cause instanceof CalendarApiError && cause.status === 503
+          ? 'The service is running without its archive, so there is no history to show.'
+          : cause instanceof CalendarApiError
+            ? cause.message
+            : String(cause),
+      );
+    } finally {
+      if (mounted.current) setLoadingHistory(false);
+    }
+  }, [earliestLoaded, loadingHistory]);
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -112,8 +167,33 @@ export function useCalendar(): CalendarState {
   }, [load]);
 
   return useMemo(
-    () => ({ data, error, loading, refreshing, live, refresh }),
-    [data, error, loading, refreshing, live, refresh],
+    () => ({
+      data,
+      error,
+      loading,
+      refreshing,
+      live,
+      refresh,
+      history,
+      loadingHistory,
+      historyError,
+      historyExhausted,
+      canLoadEarlier: data?.archiveEnabled !== false,
+      loadEarlier,
+    }),
+    [
+      data,
+      error,
+      loading,
+      refreshing,
+      live,
+      refresh,
+      history,
+      loadingHistory,
+      historyError,
+      historyExhausted,
+      loadEarlier,
+    ],
   );
 }
 

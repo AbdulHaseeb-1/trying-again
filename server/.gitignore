@@ -4,3 +4,4 @@ dist/
 .env
 .browser-profile*/
 data/
+src/generated/

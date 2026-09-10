@@ -1,10 +1,20 @@
-import { Body, Controller, Get, NotFoundException, Post, Query, Sse } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  NotFoundException,
+  Post,
+  Query,
+  ServiceUnavailableException,
+  Sse,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { fromEvent, map, startWith, type Observable } from 'rxjs';
 
 import { DerivativesScheduler } from './derivatives.scheduler';
 import { DERIVATIVES_SYNCED, DerivativesService } from './derivatives.service';
+import { DerivativesHistoryDto } from './dto/derivatives-history.dto';
 import { DerivativesQueryDto } from './dto/derivatives-query.dto';
 import { DerivativesConfigDto } from './dto/refresh-config.dto';
 
@@ -65,11 +75,44 @@ export class DerivativesController {
     };
   }
 
+  @Get('history')
+  @ApiOperation({
+    summary: 'One archived series: coin totals, venues, funding, prices, liquidations or market.',
+  })
+  @ApiOkResponse({ description: 'Stored rows, newest first.' })
+  async history(@Query() query: DerivativesHistoryDto) {
+    if (!this.derivatives.archiveEnabled) {
+      throw new ServiceUnavailableException(
+        'History needs the Postgres archive; set DATABASE_URL and run the migrations.',
+      );
+    }
+    const series = query.series ?? 'asset';
+    const rows = await this.derivatives.history(series, {
+      symbol: query.symbol,
+      exchange: query.exchange,
+      from: query.from,
+      to: query.to,
+      limit: query.limit,
+    });
+    return {
+      series,
+      symbol: query.symbol ?? null,
+      range: { from: query.from?.toISOString() ?? null, to: query.to?.toISOString() ?? null },
+      count: rows.length,
+      rows,
+    };
+  }
+
   @Get('status')
   @ApiOperation({ summary: 'Pipeline health: pages scraped, sync history, cadence.' })
-  status() {
+  async status() {
     return {
       now: new Date().toISOString(),
+      archive: {
+        enabled: this.derivatives.archiveEnabled,
+        lastWrite: this.derivatives.lastArchived,
+        ...((await this.derivatives.archiveSummary()) ?? {}),
+      },
       capturedAt: this.derivatives.capturedAt,
       snapshotCapturedAt: this.derivatives.snapshotCapturedAt,
       refreshIntervalMs: this.scheduler.refreshIntervalMs,

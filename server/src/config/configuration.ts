@@ -140,6 +140,20 @@ export const derivativesConfig = registerAs('derivatives', () => ({
     path: process.env.DERIVATIVES_SNAPSHOT_PATH ?? 'data/derivatives-snapshot.json',
     seedPath: process.env.DERIVATIVES_SNAPSHOT_SEED_PATH ?? 'seed/derivatives-snapshot.json',
   },
+
+  /** Postgres archive. Ignored entirely when DATABASE_URL is unset. */
+  archive: {
+    enabled: bool(process.env.DERIVATIVES_ARCHIVE_ENABLED, true),
+    /**
+     * How often to take a fresh observation of the series that have no natural
+     * key — the coin totals, the venue table, the market snapshot. Storing one
+     * per 60-second scrape would be a quarter of a million venue rows a day
+     * without adding information.
+     */
+    intervalMs: int(process.env.DERIVATIVES_HISTORY_INTERVAL_MS, 5 * 60_000),
+    /** Drop sampled rows older than this. 0 keeps everything. */
+    retentionDays: int(process.env.DERIVATIVES_ARCHIVE_RETENTION_DAYS, 90),
+  },
 }));
 
 export type DerivativesConfig = ReturnType<typeof derivativesConfig>;

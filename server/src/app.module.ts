@@ -4,6 +4,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 
 import { CalendarModule } from './calendar/calendar.module';
+import { DatabaseModule } from './database/database.module';
 import { calendarConfig, derivativesConfig } from './config/configuration';
 import { DerivativesModule } from './derivatives/derivatives.module';
 
@@ -12,6 +13,7 @@ import { DerivativesModule } from './derivatives/derivatives.module';
     ConfigModule.forRoot({ isGlobal: true, load: [calendarConfig, derivativesConfig], cache: true }),
     ScheduleModule.forRoot(),
     EventEmitterModule.forRoot({ maxListeners: 50 }),
+    DatabaseModule,
     CalendarModule,
     DerivativesModule,
   ],

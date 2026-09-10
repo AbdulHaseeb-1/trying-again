@@ -1,0 +1,26 @@
+# Postgres for local development. The service runs without it — the archive is
+# optional — but history endpoints need it.
+#
+#   docker compose up -d
+#   npm run prisma:migrate
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: marketpulse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: marketpulse
+      POSTGRES_PASSWORD: marketpulse
+      POSTGRES_DB: marketpulse
+    ports:
+      - '5432:5432'
+    volumes:
+      - marketpulse-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U marketpulse']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  marketpulse-postgres:
