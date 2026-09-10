@@ -17,10 +17,11 @@ import { GlassBar } from '@/components/detail/glass-bar';
 import { GroupedRow, GroupedSection } from '@/components/detail/grouped-list';
 import { buildComparison, surprise } from '@/components/detail/value-comparison';
 import { Skeleton } from '@/components/skeleton';
+import { Screen } from '@/components/screen';
 import { TabSwipe } from '@/components/tab-swipe';
 import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import {
   CURRENCY_NAMES,
   dayKey,
@@ -73,9 +74,8 @@ export default function EventDetailScreen() {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.background }]}>
+    <Screen>
       <TabSwipe>
-        <View style={styles.column}>
           <Animated.ScrollView
             onScroll={onScroll}
             scrollEventThrottle={16}
@@ -128,9 +128,8 @@ export default function EventDetailScreen() {
               />
             </GlassBar>
           </View>
-        </View>
       </TabSwipe>
-    </View>
+    </Screen>
   );
 }
 
@@ -372,8 +371,6 @@ function DetailSkeleton() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, flexDirection: 'row', justifyContent: 'center' },
-  column: { flex: 1, width: '100%', maxWidth: MaxContentWidth },
   content: { paddingHorizontal: Spacing.four, gap: Spacing.six },
 
   barSlot: { position: 'absolute', top: 0, left: 0, right: 0 },

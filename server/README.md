@@ -1,7 +1,22 @@
-# MarketPulse Calendar Service
+# MarketPulse Market Data Service
 
-NestJS service that keeps a rolling window of the [ForexFactory][ff] economic
-calendar warm and serves it to the MarketPulse app.
+NestJS service that scrapes the market data the app runs on and keeps it warm:
+the [ForexFactory][ff] economic calendar, and [CoinGlass][cg] derivatives.
+
+Both pipelines share the same shape — sources behind a timeout and a circuit
+breaker, an in-memory store that only ever advances, a last-known-good snapshot
+on disk, and an SSE stream so clients hear about a change instead of polling for
+it. Behind both sits an optional Postgres archive that remembers what the live
+window has already forgotten.
+
+- [The calendar](#the-calendar) — 2 days back, 7 days ahead, burst-polled around
+  every release.
+- [Derivatives](#derivatives) — open interest, funding, liquidations and
+  positioning per coin and per venue, refreshed every minute.
+- [The archive](#the-archive) — Prisma and Postgres: history, written
+  incrementally and read back without scraping again.
+
+# The calendar
 
 ## What it does
 
@@ -17,6 +32,9 @@ calendar warm and serves it to the MarketPulse app.
 ```bash
 npm install
 npm run build
+
+# Optional: Postgres for history (see "The archive" below).
+docker compose up -d && npm run prisma:migrate
 
 # Chromium must run headed to clear Cloudflare — on a server, under Xvfb:
 xvfb-run -a --server-args="-screen 0 1440x1000x24" node dist/main.js
@@ -36,6 +54,7 @@ the machine has no display.
 | `GET`  | `/api/calendar/status`  | Sources, sync history, and every armed release watch |
 | `POST` | `/api/calendar/refresh` | Fetch now, bypassing the interval |
 | `POST` | `/api/calendar/config`  | Retune `refreshIntervalMs` / `watchPollIntervalMs` live |
+| `GET`  | `/api/calendar/history` | Past releases from the archive, including everything older than the window |
 | `GET`  | `/api/calendar/stream`  | SSE stream of `sync` and `release` events |
 
 `GET /api/calendar` accepts `from`, `to`, `currencies` (`USD,EUR`) and
@@ -113,17 +132,6 @@ the full list with defaults. The ones worth knowing:
 | `SCRAPER_HEADLESS` | `false` | Headless will not clear Cloudflare |
 | `SCRAPER_CHROMIUM_PATH` | — | Override the Chromium binary |
 
-## Tests
-
-```bash
-npm test
-```
-
-Covers identity and merge rules (including the "never un-release a print"
-invariant and window-scoped pruning), the window/filter logic, and the release
-watcher's arm → poll → resolve and arm → poll → expire paths against a stubbed
-source.
-
 ## Tooling
 
 `scripts/import-snapshot.ts` converts a raw `calendarComponentStates` capture
@@ -135,5 +143,229 @@ one that cannot:
 npx tsx scripts/import-snapshot.ts capture.json data/calendar-snapshot.json
 ```
 
+# Derivatives
+
+Everything CoinGlass publishes about a coin's futures market, refreshed every
+minute: open interest and its change over eight windows, funding weighted three
+ways, liquidations by window / venue / coin plus the live order feed, taker and
+account-level positioning, options open interest, the full venue table, and a
+market-wide screener of ~1,000 coins.
+
+## Endpoints
+
+| Method | Path                        | Purpose |
+| ------ | --------------------------- | ------- |
+| `GET`  | `/api/derivatives`          | One asset's full breakdown plus market context (`?symbol=BTC`) |
+| `GET`  | `/api/derivatives/assets`   | Every tracked asset, fully expanded |
+| `GET`  | `/api/derivatives/market`   | Market totals, screener, liquidations, macro cards |
+| `GET`  | `/api/derivatives/status`   | Which pages answered, sync history, cadence |
+| `POST` | `/api/derivatives/refresh`  | Scrape now, bypassing the interval |
+| `POST` | `/api/derivatives/config`   | Retune `refreshIntervalMs` live |
+| `GET`  | `/api/derivatives/history`  | One archived series (`?series=asset\|venues\|funding\|prices\|liquidations\|market\|coins`) |
+| `GET`  | `/api/derivatives/liquidity-map` | The liquidation heatmap: leverage waiting to be liquidated, by price and time |
+| `GET`  | `/api/derivatives/stream`   | SSE stream of `sync` events |
+
+## How the data gets in
+
+CoinGlass encrypts every API response — the body is `{"code":"0","data":"<base64>"}`
+— and decodes it in the browser. The HTML is no better: the tables are drawn
+from that decoded state, so a DOM scrape would lose precision, units, and every
+value that only ever appears inside a chart.
+
+So the scraper lets the page do its own work and reads the result. A script
+injected before any page script wraps `JSON.parse` — the one funnel every
+decoded payload passes through — and keeps what comes out. That yields
+CoinGlass' own model, in the shape its front end consumes.
+
+Three details make it work and are easy to lose:
+
+- **The hook is injected as source text, not as a function.** Playwright
+  stringifies a function argument, which sends whatever the transpiler emitted
+  along with it — and esbuild's `keepNames` helper (`__name`) does not exist in
+  the browser. The ReferenceError fires *before* `JSON.parse` is replaced, so
+  the page runs happily and the harvest comes back empty with nothing in the
+  logs to explain it.
+- **Payloads are identified by shape, not by endpoint** (`coinglass.classify.ts`).
+  The hook never sees the request URL, but shape turns out to be the more
+  durable key anyway: CoinGlass re-versions endpoints far more often than it
+  renames fields, and an unrecognised payload is skipped rather than mis-parsed.
+- **Post-quantum TLS must be disabled** behind a TLS-terminating proxy, exactly
+  as for the calendar scraper.
+
+A run visits the home page (market totals, screener, funding extremes, macro
+cards), the liquidation page (windows, venues, coins, the largest order and the
+live feed), one page per tracked coin (venue table, funding history, price
+history, spot flow) and the heatmap page (the liquidity map, below). Pages are independent, and each one's outcome is reported
+in `/api/derivatives/status`, so a partial run is visible rather than silently
+thin. The store merges per asset, so a page that fails leaves the previous
+numbers standing instead of blanking a screen that was correct a minute ago.
+
+### The liquidity map
+
+`/pro/futures/LiquidationHeatMap` renders CoinGlass' liquidation heatmap, and
+the payload behind it is a grid: ~15,000 sparse cells over 288 five-minute
+columns and 132 price levels, plus the candles the chart draws over them. Each
+cell is the dollar value of leveraged positions that would be liquidated at that
+price, at that time — the bright bands are where a move would find fuel.
+
+Two things shape how it is served:
+
+- **It is downsampled before it leaves.** Nothing on a phone resolves 15,000
+  cells, and shipping them costs a third of a megabyte per read, so neighbouring
+  squares are *summed* (not sampled) into roughly 60x40 —
+  `COINGLASS_HEATMAP_COLUMNS` / `_LEVELS`. The price profile keeps full level
+  resolution, because "which price holds the most" is the question the map is
+  usually asked. The result is about 40 KB, and it is served from its own
+  endpoint rather than the overview so the 60-second poll stays lean.
+- **BTC only, for now.** The page reads `?coin=`, but its API answers `40000`
+  for anything except `Binance_BTCUSDT` on the open site, and neither a deep
+  link nor a client-side route change gets past that. `COINGLASS_HEATMAP_SYMBOLS`
+  is a list so a change on their side needs a config edit rather than a code
+  one; the app says plainly that other coins have no map rather than showing an
+  empty chart.
+
+CoinGlass' own `rangeLow`/`rangeHigh` describe the chart's viewport, which is
+wider than the grid it fills, so the mapper reports the span of the levels that
+actually carry data instead.
+
+The map is not archived. It is a derived picture of positions open *right now* —
+it changes wholesale every few minutes, and a history of it would be large
+without answering a question the funding, open-interest and liquidation series
+do not already answer better.
+
+### Where CoinGlass contradicts itself
+
+The per-coin liquidation payload reports `longNumber`/`shortNumber` the wrong
+way round against its own `longVolUsd`/`shortVolUsd` — and against the count
+fields CoinGlass publishes for the same coin in the screener. The mapper drops
+that pair and takes the counts from the screener; the venue payload, which is
+self-consistent, keeps its own.
+
+## Scraping by hand
+
+`scripts/scrape-coinglass.ts` runs one scrape outside the server — useful for
+re-seeding, for checking a mapper change against the live site without booting
+Nest, and for capturing on a machine that can reach CoinGlass to carry to one
+that cannot:
+
+```bash
+npx tsx scripts/scrape-coinglass.ts seed/derivatives-snapshot.json BTC,ETH,SOL
+```
+
+## Configuration
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `DERIVATIVES_ASSETS` | `BTC,ETH,SOL` | Coins to keep a full breakdown for |
+| `DERIVATIVES_REFRESH_INTERVAL_MS` | `60000` | Base refresh loop |
+| `COINGLASS_HEADLESS` | `true` | CoinGlass has no interstitial to clear |
+| `COINGLASS_SETTLE_MS` | `12000` | How long to let a page keep answering |
+| `COINGLASS_SETTLE_QUIET_MS` | `2500` | Quiet gap that ends a page early |
+| `COINGLASS_MAX_ORDERS` / `_SCREENER_ROWS` / `_SERIES_POINTS` | `60` / `100` / `240` | Caps on the firehose endpoints |
+| `COINGLASS_HEATMAP_SYMBOLS` | `BTC` | Instruments to fetch the liquidity map for |
+| `COINGLASS_HEATMAP_COLUMNS` / `_LEVELS` | `60` / `40` | Grid the heatmap is summed down to |
+
+# The archive
+
+Postgres, through [Prisma][pr]. The live window is what the app polls; this is
+where everything that has already happened goes — the calendar after an event
+scrolls out of the two-day window, and the derivatives series that CoinGlass
+only ever serves as a short tail.
+
+It is **optional**. With no `DATABASE_URL` the scrapers, the in-memory window
+and the file snapshots all work exactly as before, `/status` reports the archive
+as off, and the history endpoints answer `503` with the reason rather than an
+empty list that looks like an answer.
+
+## Setting it up
+
+```bash
+docker compose up -d          # or any Postgres you already have
+cp .env.example .env          # DATABASE_URL lives here
+npm run prisma:migrate        # create the tables
+```
+
+`npm install` runs `prisma generate` for you; `npm run prisma:deploy` is the
+non-interactive migration for deployments, and `npm run prisma:studio` opens a
+browser over the data.
+
+## What goes in, and when
+
+Writes are incremental in two different ways, because the data arrives two
+different ways:
+
+**Series that carry their own identity** — calendar events, funding intervals,
+the price series, the liquidation feed — are keyed by that identity: an event
+id, a `(symbol, timestamp)` pair, or, for a liquidation, the order itself
+(venue, contract, instant, size — CoinGlass ships no id). Every scrape re-offers
+its whole tail and the unique key rejects what is already stored, so a minute's
+scrape of 240 unchanged funding candles writes nothing. The calendar goes
+further and writes only the rows a sync actually *changed*, so a re-read of the
+same numbers touches no rows at all.
+
+**Series that exist only because we looked** — the coin totals, the venue table,
+the market snapshot — have no natural key: every sync is a new observation at a
+new instant. Storing one per 60-second scrape would be a quarter of a million
+venue rows a day without adding information, so they are sampled on their own
+interval (`DERIVATIVES_HISTORY_INTERVAL_MS`, five minutes by default) and pruned
+past `DERIVATIVES_ARCHIVE_RETENTION_DAYS`. The keyed series are never pruned —
+they are the history worth keeping.
+
+Archiving is fire-and-forget in both pipelines: a database that is slow, full or
+down logs a warning and never fails a sync, because the live scrape is the part
+users are watching.
+
+## What comes back out
+
+On boot the calendar reads the archive *and* the file snapshot and merges them:
+the archive holds everything ever seen, a fresh database holds nothing, and the
+file is all that stands between a first run and an empty screen. Where both know
+an event the stored copy wins, and anything the file knew that the archive did
+not is written back, so the two converge instead of drifting.
+
+`GET /api/calendar/history` then serves the past — filtered by range, currency,
+impact, and optionally only what has printed — from Postgres rather than from a
+scrape. `GET /api/derivatives/history` does the same for the seven derivative
+series, filtered by symbol, venue and range.
+
+## Tables
+
+| Table | What it holds | Keyed by |
+| ----- | ------------- | -------- |
+| `calendar_event` | Every release seen, with the moment it printed | event id |
+| `asset_snapshot` | A coin's derivatives market at one instant | sampled |
+| `venue_snapshot` | One contract on one venue at one instant | sampled |
+| `market_snapshot` | Whole-market totals | sampled |
+| `coin_snapshot` | Screener rows over time | sampled |
+| `funding_point` | Funding intervals | `(symbol, at)` |
+| `price_point` | Price series | `(symbol, at)` |
+| `liquidation_order` | The live liquidation feed | the order's own fingerprint |
+
+# Tests
+
+```bash
+npm test
+
+# Archive tests against a real database (a scratch one — it truncates tables):
+TEST_DATABASE_URL=postgresql://…/marketpulse_test npm test
+```
+
+For the calendar: identity and merge rules (including the "never un-release a
+print" invariant and window-scoped pruning), the window/filter logic, and the
+release watcher's arm → poll → resolve and arm → poll → expire paths against a
+stubbed source.
+
+For derivatives: shape classification (including the payloads that must *not*
+be recognised), the mapper's coercion and the contradictions it works around,
+and the store's guarantee that a partial run never blanks an asset an earlier
+run captured.
+
+For the archive: what each pipeline decides to write and when — against a fake
+client for the decisions, and against a real Postgres (opt-in, via
+`TEST_DATABASE_URL`) for the promise only a database can keep, that re-offering
+stored rows collapses into the rows already there.
+
 [ff]: https://www.forexfactory.com/calendar
+[cg]: https://www.coinglass.com
+[pr]: https://www.prisma.io
 [ck]: https://github.com/connor4312/cockatiel

@@ -92,3 +92,87 @@ export const calendarConfig = registerAs('calendar', () => ({
 }));
 
 export type CalendarConfig = ReturnType<typeof calendarConfig>;
+
+/**
+ * The derivatives pipeline. CoinGlass renders its numbers client-side from
+ * encrypted API payloads, so everything here is tuned for a browser session
+ * that visits a handful of pages and harvests what the page itself decoded.
+ */
+export const derivativesConfig = registerAs('derivatives', () => ({
+  /** Coins the service keeps a full per-asset breakdown for. */
+  assets: (process.env.DERIVATIVES_ASSETS ?? 'BTC,ETH,SOL')
+    .split(',')
+    .map((symbol) => symbol.trim().toUpperCase())
+    .filter(Boolean),
+
+  /** Base polling loop. Derivatives move constantly; a minute is plenty. */
+  refreshIntervalMs: int(process.env.DERIVATIVES_REFRESH_INTERVAL_MS, 60_000),
+  refreshOnBoot: bool(process.env.DERIVATIVES_REFRESH_ON_BOOT, true),
+
+  sourcePolicy: {
+    timeoutMs: int(process.env.DERIVATIVES_SOURCE_TIMEOUT_MS, 180_000),
+    breakerThreshold: int(process.env.DERIVATIVES_SOURCE_BREAKER_THRESHOLD, 3),
+    breakerCooldownMs: int(process.env.DERIVATIVES_SOURCE_BREAKER_COOLDOWN_MS, 5 * 60_000),
+  },
+
+  scraper: {
+    baseUrl: process.env.COINGLASS_URL ?? 'https://www.coinglass.com',
+    /** CoinGlass has no interstitial, so headless is fine here. */
+    headless: bool(process.env.COINGLASS_HEADLESS, true),
+    executablePath: process.env.COINGLASS_CHROMIUM_PATH || process.env.SCRAPER_CHROMIUM_PATH || undefined,
+    navigationTimeoutMs: int(process.env.COINGLASS_NAVIGATION_TIMEOUT_MS, 90_000),
+    /** How long to let a page keep answering XHRs before harvesting it. */
+    settleMs: int(process.env.COINGLASS_SETTLE_MS, 12_000),
+    /** Stop waiting early once this many decoded payloads have landed. */
+    settleQuietMs: int(process.env.COINGLASS_SETTLE_QUIET_MS, 2_500),
+    idleShutdownMs: int(process.env.COINGLASS_IDLE_SHUTDOWN_MS, 10 * 60_000),
+    userDataDir: process.env.COINGLASS_USER_DATA_DIR ?? '.browser-profile-coinglass',
+    proxyServer: process.env.COINGLASS_PROXY_SERVER || process.env.SCRAPER_PROXY_SERVER || process.env.HTTPS_PROXY || undefined,
+    retries: int(process.env.COINGLASS_RETRIES, 1),
+    /** Cap the rows kept from the firehose endpoints (orders, screener, series). */
+    maxOrders: int(process.env.COINGLASS_MAX_ORDERS, 60),
+    maxScreenerRows: int(process.env.COINGLASS_MAX_SCREENER_ROWS, 100),
+    maxSeriesPoints: int(process.env.COINGLASS_MAX_SERIES_POINTS, 240),
+  },
+
+  /**
+   * The liquidation heatmap — CoinGlass' "liquidity map".
+   *
+   * Only the instruments listed here are fetched, and only BTC works on the
+   * free site today: the page reads `?coin=`, but its API answers `40000` for
+   * anything else, so a wider list would just log failures. It stays a list so
+   * that changes on their side need a config change, not a code change.
+   */
+  heatmap: {
+    enabled: bool(process.env.COINGLASS_HEATMAP_ENABLED, true),
+    symbols: (process.env.COINGLASS_HEATMAP_SYMBOLS ?? 'BTC')
+      .split(',')
+      .map((symbol) => symbol.trim().toUpperCase())
+      .filter(Boolean),
+    /** The grid the raw ~15k cells are summed into before they leave here. */
+    maxColumns: int(process.env.COINGLASS_HEATMAP_COLUMNS, 60),
+    maxLevels: int(process.env.COINGLASS_HEATMAP_LEVELS, 40),
+  },
+
+  snapshot: {
+    enabled: bool(process.env.DERIVATIVES_SNAPSHOT_ENABLED, true),
+    path: process.env.DERIVATIVES_SNAPSHOT_PATH ?? 'data/derivatives-snapshot.json',
+    seedPath: process.env.DERIVATIVES_SNAPSHOT_SEED_PATH ?? 'seed/derivatives-snapshot.json',
+  },
+
+  /** Postgres archive. Ignored entirely when DATABASE_URL is unset. */
+  archive: {
+    enabled: bool(process.env.DERIVATIVES_ARCHIVE_ENABLED, true),
+    /**
+     * How often to take a fresh observation of the series that have no natural
+     * key — the coin totals, the venue table, the market snapshot. Storing one
+     * per 60-second scrape would be a quarter of a million venue rows a day
+     * without adding information.
+     */
+    intervalMs: int(process.env.DERIVATIVES_HISTORY_INTERVAL_MS, 5 * 60_000),
+    /** Drop sampled rows older than this. 0 keeps everything. */
+    retentionDays: int(process.env.DERIVATIVES_ARCHIVE_RETENTION_DAYS, 90),
+  },
+}));
+
+export type DerivativesConfig = ReturnType<typeof derivativesConfig>;

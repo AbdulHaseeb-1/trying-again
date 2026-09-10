@@ -24,15 +24,17 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.createDocument(
       app,
       new DocumentBuilder()
-        .setTitle('MarketPulse Calendar API')
-        .setDescription('ForexFactory economic calendar, scraped and kept warm.')
+        .setTitle('MarketPulse Market Data API')
+        .setDescription(
+          'ForexFactory economic calendar and CoinGlass derivatives, scraped and kept warm.',
+        )
         .setVersion('1.0.0')
         .build(),
     ),
   );
 
   await app.listen(config.http.port, '0.0.0.0');
-  new Logger('Bootstrap').log(`calendar API listening on http://localhost:${config.http.port}`);
+  new Logger('Bootstrap').log(`API listening on http://localhost:${config.http.port}`);
 }
 
 void bootstrap();

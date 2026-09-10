@@ -1,0 +1,209 @@
+// The archive.
+//
+// The scrapers hold a live window in memory — a few days of calendar, the
+// latest derivatives snapshot — because that is what the app reads on every
+// poll. This is where the rest of it goes: everything that has already
+// happened, kept so a number that printed last week is still answerable
+// without scraping for it again.
+//
+// Two rules shape the tables below:
+//
+//  1. Writes are incremental. Rows already stored are never rewritten, and a
+//     sync that saw nothing new writes nothing at all.
+//  2. Every time series is keyed by its natural identity — an event id, a
+//     (symbol, timestamp) pair, a liquidation's own fingerprint — so a repeated
+//     scrape of overlapping data collapses into the rows already there instead
+//     of duplicating them.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// One economic release, carried forward after it leaves the live window.
+model CalendarEvent {
+  /// Deterministic across sources and refreshes: title + currency + day.
+  id            String    @id
+  sourceId      Int?      @map("source_id")
+  title         String
+  currency      String
+  country       String
+  impact        String
+  scheduledAt   DateTime  @map("scheduled_at")
+  timePrecision String    @map("time_precision")
+  actual        String?
+  forecast      String?
+  previous      String?
+  revision      String?
+  outcome       String
+  released      Boolean
+  leaked        Boolean
+  source        String
+  detailUrl     String?   @map("detail_url")
+  /// When this row was first written, as opposed to when it last changed.
+  firstSeenAt   DateTime  @default(now()) @map("first_seen_at")
+  updatedAt     DateTime  @map("updated_at")
+  /// The moment an `actual` first appeared — the print itself, not a re-read.
+  releasedAt    DateTime? @map("released_at")
+
+  @@index([scheduledAt])
+  @@index([currency, scheduledAt])
+  @@index([impact, scheduledAt])
+  @@map("calendar_event")
+}
+
+/// A coin's derivatives market at one moment, as the scraper saw it.
+model AssetSnapshot {
+  id                      Int      @id @default(autoincrement())
+  symbol                  String
+  capturedAt              DateTime @map("captured_at")
+  price                   Float?
+  priceChangePercent24h   Float?   @map("price_change_percent_24h")
+  marketCap               Float?   @map("market_cap")
+  openInterestUsd         Float?   @map("open_interest_usd")
+  openInterestAmount      Float?   @map("open_interest_amount")
+  openInterestChange24h   Float?   @map("open_interest_change_24h")
+  volumeUsd24h            Float?   @map("volume_usd_24h")
+  volumeChange24h         Float?   @map("volume_change_24h")
+  oiVolumeRatio           Float?   @map("oi_volume_ratio")
+  fundingByOpenInterest   Float?   @map("funding_by_open_interest")
+  fundingByVolume         Float?   @map("funding_by_volume")
+  fundingAnnualized       Float?   @map("funding_annualized")
+  longShortRatio24h       Float?   @map("long_short_ratio_24h")
+  globalAccountRatio      Float?   @map("global_account_ratio")
+  topAccountRatio         Float?   @map("top_account_ratio")
+  topPositionRatio        Float?   @map("top_position_ratio")
+  optionsOpenInterestUsd  Float?   @map("options_open_interest_usd")
+  optionsVolumeUsd24h     Float?   @map("options_volume_usd_24h")
+  liquidationUsd24h       Float?   @map("liquidation_usd_24h")
+  longLiquidationUsd24h   Float?   @map("long_liquidation_usd_24h")
+  shortLiquidationUsd24h  Float?   @map("short_liquidation_usd_24h")
+  liquidationCount24h     Int?     @map("liquidation_count_24h")
+  venueCount              Int      @map("venue_count")
+
+  @@unique([symbol, capturedAt])
+  @@index([symbol, capturedAt])
+  @@map("asset_snapshot")
+}
+
+/// One contract on one venue at one moment.
+model VenueSnapshot {
+  id                     Int      @id @default(autoincrement())
+  symbol                 String
+  exchange               String
+  /// The venue's own contract id, or its display symbol when it has none — a
+  /// plain string rather than a nullable one, so the unique key never sees a
+  /// NULL (which Postgres treats as distinct from every other NULL).
+  instrument             String
+  capturedAt             DateTime @map("captured_at")
+  perpetual              Boolean
+  openInterestUsd        Float    @map("open_interest_usd")
+  openInterestAmount     Float?   @map("open_interest_amount")
+  openInterestChange24h  Float?   @map("open_interest_change_24h")
+  volumeUsd24h           Float?   @map("volume_usd_24h")
+  fundingRate            Float?   @map("funding_rate")
+  fundingIntervalHours   Int?     @map("funding_interval_hours")
+  longRate               Float?   @map("long_rate")
+  shortRate              Float?   @map("short_rate")
+  longLiquidationUsd24h  Float?   @map("long_liquidation_usd_24h")
+  shortLiquidationUsd24h Float?   @map("short_liquidation_usd_24h")
+  price                  Float?
+
+  @@unique([symbol, exchange, instrument, capturedAt])
+  @@index([symbol, capturedAt])
+  @@index([exchange, capturedAt])
+  @@map("venue_snapshot")
+}
+
+/// The whole futures market at one moment.
+model MarketSnapshot {
+  id                    Int      @id @default(autoincrement())
+  capturedAt            DateTime @unique @map("captured_at")
+  openInterestUsd       Float?   @map("open_interest_usd")
+  openInterestChange24h Float?   @map("open_interest_change_24h")
+  liquidationUsd24h     Float?   @map("liquidation_usd_24h")
+  liquidationChange24h  Float?   @map("liquidation_change_24h")
+  tradersLiquidated24h  Int?     @map("traders_liquidated_24h")
+  averageRsi            Float?   @map("average_rsi")
+  coinsTracked          Int      @map("coins_tracked")
+
+  @@index([capturedAt])
+  @@map("market_snapshot")
+}
+
+/// A screener row kept over time, so the market can be read coin by coin.
+model CoinSnapshot {
+  id                     Int      @id @default(autoincrement())
+  symbol                 String
+  capturedAt             DateTime @map("captured_at")
+  price                  Float?
+  priceChangePercent24h  Float?   @map("price_change_percent_24h")
+  openInterestUsd        Float?   @map("open_interest_usd")
+  openInterestChange24h  Float?   @map("open_interest_change_24h")
+  volumeUsd24h           Float?   @map("volume_usd_24h")
+  fundingByOpenInterest  Float?   @map("funding_by_open_interest")
+  fundingAnnualized      Float?   @map("funding_annualized")
+  longShortRatio24h      Float?   @map("long_short_ratio_24h")
+  liquidationUsd24h      Float?   @map("liquidation_usd_24h")
+  marketCap              Float?   @map("market_cap")
+
+  @@unique([symbol, capturedAt])
+  @@index([capturedAt])
+  @@map("coin_snapshot")
+}
+
+/// A funding interval. CoinGlass serves a fixed tail of history per scrape, so
+/// the archive grows by whatever the newest scrape added and nothing else.
+model FundingPoint {
+  symbol     String
+  at         DateTime
+  open       Float
+  high       Float
+  low        Float
+  close      Float
+  priceOpen  Float?   @map("price_open")
+  priceClose Float?   @map("price_close")
+
+  @@id([symbol, at])
+  @@index([symbol, at])
+  @@map("funding_point")
+}
+
+/// A price point from the coin page's own series.
+model PricePoint {
+  symbol    String
+  at        DateTime
+  price     Float
+  marketCap Float?   @map("market_cap")
+
+  @@id([symbol, at])
+  @@index([symbol, at])
+  @@map("price_point")
+}
+
+/// A single liquidated position from the live feed.
+model LiquidationOrder {
+  /// CoinGlass ships no id on the feed rows, so identity is the order itself:
+  /// venue, contract, instant and size. A re-scrape of an overlapping window
+  /// therefore re-inserts nothing.
+  id           String   @id
+  exchange     String
+  symbol       String
+  instrumentId String?  @map("instrument_id")
+  side         String?
+  price        Float?
+  quantity     Float?
+  usd          Float
+  at           DateTime
+
+  @@index([at])
+  @@index([symbol, at])
+  @@index([exchange, at])
+  @@map("liquidation_order")
+}

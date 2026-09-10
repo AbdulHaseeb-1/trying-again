@@ -1,27 +1,69 @@
 import { useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
 import { BottomSheet } from '@/components/bottom-sheet';
 import { MarketSessionBanner, SessionVariantSheet, WorldClockSheet } from '@/components/market-session';
-import { AppHeader, MetricTile, SectionHeader } from '@/components/market-ui';
-import { EventRow } from '@/components/calendar/event-row';
+import { MetricTile, SectionHeader } from '@/components/market-ui';
+import { Screen, ScreenHeader, useChromeInset } from '@/components/screen';
+import { EventRow, ValueLegend } from '@/components/calendar/event-row';
 import { NextReleaseCard } from '@/components/calendar/next-release-card';
 import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { impactRank, type CalendarEvent } from '@/data/calendar';
-import { derivativeMetrics, marketAssets } from '@/data/market';
+import type { AssetSummary } from '@/data/derivatives';
+import {
+  changeTone,
+  formatPercent,
+  formatUsd,
+  fundingTone,
+  fundingVerdict,
+  formatPrice,
+  formatRate,
+  ratioToLongPercent,
+} from '@/data/derivatives';
 import { useCalendar, useNow } from '@/hooks/use-calendar';
+import { useDerivatives } from '@/hooks/use-derivatives';
 import { useAppTheme, useTheme } from '@/hooks/use-theme';
+
+/** The four numbers worth carrying on a screen that is mostly about the calendar. */
+function derivativeTiles(summary: AssetSummary) {
+  const longPercent = ratioToLongPercent(summary.longShortRatio.h24);
+  return [
+    {
+      label: 'Open interest',
+      value: formatUsd(summary.openInterestUsd),
+      note: formatPercent(summary.openInterestChange.h24),
+      tone: changeTone(summary.openInterestChange.h24),
+    },
+    {
+      label: 'Funding',
+      value: formatRate(summary.fundingRateByOpenInterest),
+      note: fundingVerdict(summary.fundingRateByOpenInterest),
+      tone: fundingTone(summary.fundingRateByOpenInterest),
+    },
+    {
+      label: 'Long / short',
+      value: longPercent === null ? '—' : `${Math.round(longPercent)}% / ${Math.round(100 - longPercent)}%`,
+      note: longPercent === null ? '—' : longPercent >= 50 ? 'Longs ahead' : 'Shorts ahead',
+      tone: 'neutral' as const,
+    },
+    {
+      label: 'Liquidations',
+      value: formatUsd(summary.liquidationUsd24h),
+      note: '24H',
+      tone: 'warning' as const,
+    },
+  ];
+}
 
 export default function PulseScreen() {
   const router = useRouter();
   const theme = useTheme();
   const { fontScale, setFontScale } = useAppTheme();
-  const insets = useSafeAreaInsets();
+  const bottomInset = useChromeInset();
   const [reminders, setReminders] = useState<string[]>([]);
   const [quickSheet, setQuickSheet] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -29,7 +71,9 @@ export default function PulseScreen() {
   const [clockSheetOpen, setClockSheetOpen] = useState(false);
 
   const now = useNow();
-  const { data, refreshing, refresh } = useCalendar();
+  const { data, refreshing, refresh, live } = useCalendar();
+  // No symbol: the service leads with whatever it tracks first, usually BTC.
+  const { data: derivatives } = useDerivatives(null);
 
   // The Pulse tab cares about what can actually move a market, so it leads on
   // the next high-impact print and previews the rest.
@@ -56,35 +100,32 @@ export default function PulseScreen() {
   const openAsset = (symbol: string) => router.push({ pathname: '/asset/[symbol]', params: { symbol } });
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.background }]}>
+    <Screen>
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: 128 + insets.bottom }]}
+        contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} />}>
-        <AppHeader onSearch={() => setQuickSheet(true)} onSettings={() => setSettingsOpen(true)} />
-        {/* <MarketTicker assets={tickerAssets} onAssetPress={(asset) => openAsset(asset.symbol)} /> */}
+        <ScreenHeader
+          title="MarketPulse"
+          status={
+            <View style={styles.statusLine}>
+              <View style={[styles.liveDot, { backgroundColor: live ? theme.positive : theme.textMuted }]} />
+              <ThemedText type="small" themeColor="textMuted" numberOfLines={1}>
+                {new Date(now).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}
+                {data ? ` · ${upcoming.length} releases ahead` : ' · connecting'}
+              </ThemedText>
+            </View>
+          }
+          actions={[
+            { icon: 'search', label: 'Quick search', onPress: () => setQuickSheet(true) },
+            { icon: 'settings', label: 'Settings', onPress: () => setSettingsOpen(true) },
+          ]}
+        />
 
         <MarketSessionBanner
           onExploreVariants={() => setSessionSheetOpen(true)}
           onPressClock={() => setClockSheetOpen(true)}
         />
-
-        <View style={styles.heroRow}>
-          <View>
-            <ThemedText style={styles.title}>Market Pulse</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {new Date(now).toLocaleDateString(undefined, {
-                month: 'long',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </ThemedText>
-          </View>
-          <View style={[styles.live, { backgroundColor: `${theme.positive}16` }]}>
-            <View style={[styles.liveDot, { backgroundColor: theme.positive }]} />
-            <ThemedText type="smallBold" style={{ color: theme.positive }}>Live</ThemedText>
-          </View>
-        </View>
 
         {nextHighImpact ? (
           <NextReleaseCard
@@ -97,11 +138,12 @@ export default function PulseScreen() {
 
         {preview.length ? (
           <View style={[styles.group, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <SectionHeader
-              title="Upcoming releases"
-              action="Calendar"
-              onAction={openCalendar}
-            />
+            <SectionHeader title="Upcoming releases" action="Calendar" onAction={openCalendar} />
+            {/* The rows carry no labels of their own — the legend explains the
+                value columns here exactly as the day header does in Calendar. */}
+            <View style={styles.legendRow}>
+              <ValueLegend />
+            </View>
             {preview.map((event) => (
               <EventRow key={event.id} event={event} onSelect={openEvent} />
             ))}
@@ -117,23 +159,47 @@ export default function PulseScreen() {
           <AppIcon name="chevron" color={theme.textMuted} />
         </View>
 
-        <View style={styles.sectionGap}>
-          <SectionHeader title="Derivatives snapshot" action="Details" onAction={() => router.push('/derivatives')} />
-          <View style={[styles.metrics, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            {derivativeMetrics.map((metric) => <MetricTile key={metric.label} label={metric.label} value={metric.value} note={metric.change} tone={metric.tone} />)}
+        {derivatives?.asset ? (
+          <View style={styles.sectionGap}>
+            <SectionHeader
+              title={`${derivatives.asset.summary.symbol} derivatives`}
+              action="Details"
+              onAction={() => router.push('/derivatives')}
+            />
+            <View style={[styles.metrics, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              {derivativeTiles(derivatives.asset.summary).map((tile) => (
+                <MetricTile key={tile.label} label={tile.label} value={tile.value} note={tile.note} tone={tile.tone} />
+              ))}
+            </View>
           </View>
-        </View>
+        ) : null}
       </ScrollView>
 
       <BottomSheet visible={quickSheet} title="Quick search" onClose={() => setQuickSheet(false)}>
         <View style={styles.sheetOptions}>
-          {marketAssets.slice(0, 4).map((asset) => (
-            <Tap key={asset.symbol} accessibilityRole="button" onPress={() => { setQuickSheet(false); openAsset(asset.symbol); }} style={[styles.sheetRow, { borderBottomColor: theme.border }]}>
-              <ThemedText style={styles.sheetSymbol}>{asset.symbol}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">{asset.name}</ThemedText>
+          {(derivatives?.market?.screener ?? []).slice(0, 6).map((row) => (
+            <Tap
+              key={row.symbol}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${row.name ?? row.symbol}`}
+              onPress={() => {
+                setQuickSheet(false);
+                openAsset(row.symbol);
+              }}
+              style={[styles.sheetRow, { borderBottomColor: theme.border }]}>
+              <ThemedText style={styles.sheetSymbol}>{row.symbol}</ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" numberOfLines={1} style={styles.sheetName}>
+                {row.name ?? '—'}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textMuted">{formatPrice(row.price)}</ThemedText>
               <AppIcon name="chevron" color={theme.textMuted} />
             </Tap>
           ))}
+          {derivatives?.market?.screener.length ? null : (
+            <ThemedText type="small" themeColor="textSecondary">
+              Markets load once the service has scraped.
+            </ThemedText>
+          )}
         </View>
       </BottomSheet>
 
@@ -170,16 +236,14 @@ export default function PulseScreen() {
         visible={clockSheetOpen}
         onClose={() => setClockSheetOpen(false)}
       />
-    </View>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
   content: { paddingHorizontal: Spacing.four, paddingTop: Spacing.four, paddingBottom: Spacing.eight, gap: Spacing.four },
-  heroRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: Spacing.one },
-  title: { fontSize: 27, lineHeight: 32, fontWeight: '700', letterSpacing: -0.6 },
-  live: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: Radius.full, paddingHorizontal: Spacing.two, paddingVertical: 4 },
+  legendRow: { flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: Spacing.one },
+  statusLine: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   liveDot: { width: 6, height: 6, borderRadius: Radius.full },
   group: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.lg, paddingHorizontal: Spacing.two, paddingVertical: Spacing.three, gap: Spacing.one },
   sectionGap: { gap: Spacing.three },
@@ -190,6 +254,7 @@ const styles = StyleSheet.create({
   metrics: { borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.lg, padding: Spacing.four, flexDirection: 'row', flexWrap: 'wrap', rowGap: Spacing.five },
   sheetOptions: { gap: 0 },
   sheetRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: Spacing.three, borderBottomWidth: StyleSheet.hairlineWidth },
+  sheetName: { flex: 1 },
   sheetSymbol: { width: 40, fontWeight: '700' },
   settingGroup: { gap: Spacing.two },
   fontOptions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },

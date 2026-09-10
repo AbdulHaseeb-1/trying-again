@@ -3,7 +3,7 @@ import { ConfigType } from '@nestjs/config';
 import { ConstantBackoff, handleAll, retry } from 'cockatiel';
 import { DateTime } from 'luxon';
 
-import { BrowserService } from '../../browser/browser.service';
+import { BrowserService, type BrowserProfile } from '../../browser/browser.service';
 import { calendarConfig } from '../../config/configuration';
 import type { CalendarEvent, SourceName } from '../calendar.types';
 import type { CalendarSource, FetchWindow, SourceResult } from './calendar-source';
@@ -34,11 +34,24 @@ export class ForexFactoryScraper implements CalendarSource {
 
   private readonly logger = new Logger(ForexFactoryScraper.name);
 
+  private readonly profile: BrowserProfile;
+
   constructor(
     private readonly browser: BrowserService,
     @Inject(calendarConfig.KEY)
     private readonly config: ConfigType<typeof calendarConfig>,
-  ) {}
+  ) {
+    const { scraper } = config;
+    this.profile = {
+      name: 'forex-factory',
+      userDataDir: scraper.userDataDir,
+      headless: scraper.headless,
+      executablePath: scraper.executablePath,
+      navigationTimeoutMs: scraper.navigationTimeoutMs,
+      idleShutdownMs: scraper.idleShutdownMs,
+      proxyServer: scraper.proxyServer,
+    };
+  }
 
   /**
    * ForexFactory's range syntax, e.g. `sep7.2026-sep16.2026`.
@@ -66,7 +79,7 @@ export class ForexFactoryScraper implements CalendarSource {
     const raw = await policy.execute(async () => {
       attempt += 1;
       // A stale profile is a common cause of a stuck challenge; start clean on retry.
-      if (attempt > 1) await this.browser.recycle();
+      if (attempt > 1) await this.browser.recycle(this.profile);
       return this.scrape(range);
     });
 
@@ -85,7 +98,7 @@ export class ForexFactoryScraper implements CalendarSource {
 
   private async scrape(range: FetchWindow): Promise<RawForexFactoryEvent[]> {
     const url = this.buildUrl(range);
-    return this.browser.withPage(async (page) => {
+    return this.browser.withPage(this.profile, async (page) => {
       this.logger.debug(`GET ${url}`);
       await page.goto(url, { waitUntil: 'domcontentloaded' });
 

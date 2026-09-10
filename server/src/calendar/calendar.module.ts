@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { BrowserModule } from '../browser/browser.module';
+import { CalendarArchive } from './calendar.archive';
 import { CalendarController } from './calendar.controller';
 import { CalendarScheduler } from './calendar.scheduler';
 import { CalendarService } from './calendar.service';
@@ -13,6 +14,7 @@ import { ForexFactoryScraper } from './sources/forex-factory.scraper';
   imports: [BrowserModule],
   controllers: [CalendarController],
   providers: [
+    CalendarArchive,
     CalendarService,
     CalendarStore,
     CalendarSnapshot,

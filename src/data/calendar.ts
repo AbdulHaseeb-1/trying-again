@@ -44,6 +44,12 @@ export type SyncOutcome = {
   released: string[];
 };
 
+export type CalendarHistoryResponse = {
+  range: { from: string | null; to: string | null };
+  count: number;
+  events: CalendarEvent[];
+};
+
 export type CalendarResponse = {
   window: { from: string; to: string };
   generatedAt: string;
@@ -51,6 +57,8 @@ export type CalendarResponse = {
   lastChangedAt: string | null;
   snapshotCapturedAt: string | null;
   refreshIntervalMs: number;
+  /** False when the service is running without its Postgres archive. */
+  archiveEnabled?: boolean;
   nextRelease: CalendarEvent | null;
   count: number;
   days: { date: string; events: CalendarEvent[] }[];
