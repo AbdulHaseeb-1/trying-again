@@ -36,9 +36,17 @@ export class DerivativesController {
     const available = this.derivatives.available;
     const symbol = query.symbol ?? available[0];
     const asset = symbol ? this.derivatives.asset(symbol) : null;
-    if (query.symbol && !asset && available.length) {
+    const market = this.derivatives.market;
+
+    // A coin the scraper does not keep a full breakdown for still has a
+    // screener row, which is enough for a detail screen — so only a symbol the
+    // service has never heard of is a 404. Anything else would make every coin
+    // in the market list a dead end.
+    const known =
+      Boolean(asset) || (market?.screener.some((row) => row.symbol === symbol) ?? false);
+    if (query.symbol && !known && (available.length || market)) {
       throw new NotFoundException(
-        `no derivatives data for ${query.symbol}; available: ${available.join(', ')}`,
+        `no derivatives data for ${query.symbol}; tracked in full: ${available.join(', ') || 'none'}`,
       );
     }
 
@@ -53,8 +61,10 @@ export class DerivativesController {
       /** Symbols with a liquidity map, so the app knows whether to offer one. */
       liquidityMaps: this.derivatives.mappedSymbols,
       symbol: asset?.summary.symbol ?? symbol ?? null,
+      /** False when only a screener row exists, not the full venue breakdown. */
+      tracked: Boolean(asset),
       asset,
-      market: this.derivatives.market,
+      market,
     };
   }
 

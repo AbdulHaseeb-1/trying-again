@@ -250,6 +250,8 @@ export type DerivativesResponse = {
   /** Symbols the service captured a liquidity map for. */
   liquidityMaps?: string[];
   symbol: string | null;
+  /** False when the service has only a screener row for this coin. */
+  tracked?: boolean;
   asset: AssetDerivatives | null;
   market: MarketOverview | null;
 };

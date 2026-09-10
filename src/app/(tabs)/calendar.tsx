@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, SectionList, StyleSheet, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
 import { CalendarFilters, type CalendarFilterState } from '@/components/calendar/calendar-filters';
@@ -10,6 +9,7 @@ import { EventRow } from '@/components/calendar/event-row';
 import { NextReleaseCard } from '@/components/calendar/next-release-card';
 import { SyncStatus } from '@/components/calendar/sync-status';
 import { EmptyState } from '@/components/market-ui';
+import { Screen, ScreenHeader, useChromeInset } from '@/components/screen';
 import { Skeleton } from '@/components/skeleton';
 import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
@@ -32,7 +32,7 @@ const EMPTY_FILTERS: CalendarFilterState = { minImpact: null, currencies: [] };
 export default function CalendarScreen() {
   const theme = useTheme();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
+  const bottomInset = useChromeInset();
   const now = useNow();
   const {
     data,
@@ -98,15 +98,12 @@ export default function CalendarScreen() {
   const filtered = filters.minImpact !== null || filters.currencies.length > 0;
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.background }]}>
-      {/* Constrained and centred like every other tab, so the value columns
-          stay next to the event titles on tablets and the web. */}
-      <View style={styles.column}>
+    <Screen>
         <SectionList
           sections={sections}
           keyExtractor={(item) => item.id}
           stickySectionHeadersEnabled
-          contentContainerStyle={[styles.content, { paddingBottom: 128 + insets.bottom }]}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}
           showsVerticalScrollIndicator={false}
           initialNumToRender={16}
           windowSize={9}
@@ -115,20 +112,11 @@ export default function CalendarScreen() {
           }
           ListHeaderComponent={
             <View style={styles.header}>
-              <View style={styles.titleRow}>
-                <View style={styles.titleBlock}>
-                  <ThemedText style={styles.screenTitle}>Calendar</ThemedText>
-                  {data ? <SyncStatus data={data} live={live} now={now} /> : null}
-                </View>
-                <Tap
-                  accessibilityRole="button"
-                  accessibilityLabel="Refresh calendar"
-                  onPress={refresh}
-                  haptic="none"
-                  style={[styles.iconButton, { borderColor: theme.border }]}>
-                  <AppIcon name="trend" size={16} color={theme.textSecondary} />
-                </Tap>
-              </View>
+              <ScreenHeader
+                title="Calendar"
+                status={data ? <SyncStatus data={data} live={live} now={now} /> : null}
+                actions={[{ icon: 'trend', label: 'Refresh calendar', onPress: refresh }]}
+              />
 
               {error ? <ErrorNotice message={error} onRetry={refresh} /> : null}
 
@@ -186,9 +174,7 @@ export default function CalendarScreen() {
           )
         }
         />
-      </View>
-
-    </View>
+    </Screen>
   );
 }
 

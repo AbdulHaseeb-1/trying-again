@@ -76,10 +76,12 @@ function EventRowComponent({
       </View>
 
       <View style={styles.values}>
+        {/* An em dash for a missing number: the interpunct read as a speck of
+            dust rather than as "nothing here yet". */}
         <ThemedText
           style={[styles.actual, { color: event.actual ? actualColor : theme.textMuted }]}
           numberOfLines={1}>
-          {event.actual ?? '·'}
+          {event.actual ?? '—'}
         </ThemedText>
         <View style={styles.secondaryValues}>
           {/* Before a print the forecast is the number being traded, so it
@@ -90,10 +92,10 @@ function EventRowComponent({
               { color: event.released ? theme.textMuted : theme.textSecondary },
             ]}
             numberOfLines={1}>
-            {event.forecast ?? '·'}
+            {event.forecast ?? '—'}
           </ThemedText>
           <ThemedText style={[styles.secondary, { color: theme.textMuted }]} numberOfLines={1}>
-            {event.previous ?? '·'}
+            {event.previous ?? '—'}
           </ThemedText>
         </View>
       </View>

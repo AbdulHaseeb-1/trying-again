@@ -65,7 +65,9 @@ export function StatGrid({ stats }: { stats: Stat[] }) {
           <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>{stat.label}</ThemedText>
           <ThemedText style={styles.gridValue}>{stat.value}</ThemedText>
           {stat.note ? (
-            <ThemedText type="small" style={{ color: toneColor(theme, stat.tone ?? 'neutral') }} numberOfLines={1}>
+            // Two lines: a note explaining what a ratio means does not fit one
+            // at phone width, and a truncated explanation explains nothing.
+            <ThemedText type="small" style={{ color: toneColor(theme, stat.tone ?? 'neutral') }} numberOfLines={2}>
               {stat.note}
             </ThemedText>
           ) : null}
@@ -113,7 +115,14 @@ export function SplitBar({
   );
 }
 
-/** A labelled proportion bar — venue share of open interest, and the like. */
+/**
+ * A labelled proportion bar — venue share of open interest, and the like.
+ *
+ * It fills the width it is given, which a column hands it for free. Inside a
+ * flex row the caller must give it room (`flex: 1` on a wrapper): putting the
+ * flex here would stretch the 6px track down the height of every card it sits
+ * in, since a column's main axis is the vertical one.
+ */
 export function ShareBar({ percent, tone = 'positive' }: { percent: number; tone?: Tone }) {
   const theme = useTheme();
   const color = toneColor(theme, tone);
@@ -218,7 +227,7 @@ const styles = StyleSheet.create({
   splitLabels: { flexDirection: 'row', justifyContent: 'space-between' },
   splitTrack: { overflow: 'hidden', borderRadius: Radius.full },
   splitFill: { height: '100%', borderRadius: Radius.full },
-  shareTrack: { height: 6, borderRadius: Radius.full, overflow: 'hidden' },
+  shareTrack: { width: '100%', height: 6, borderRadius: Radius.full, overflow: 'hidden' },
   shareFill: { height: '100%', borderRadius: Radius.full },
   strip: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   stripCell: {

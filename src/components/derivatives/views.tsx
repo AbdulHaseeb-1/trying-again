@@ -109,7 +109,7 @@ export function OverviewView({ asset, market, now }: ViewProps) {
             {
               label: 'OI / 24H volume',
               value: summary.oiVolumeRatio === null ? '—' : summary.oiVolumeRatio.toFixed(2),
-              note: 'Higher means positions are being held',
+              note: 'Higher means positions are held, not churned',
             },
             {
               label: 'OI / market cap',

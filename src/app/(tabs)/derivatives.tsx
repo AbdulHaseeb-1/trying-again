@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppIcon } from '@/components/app-icon';
 import { BottomSheet } from '@/components/bottom-sheet';
@@ -16,6 +15,7 @@ import {
   PositioningView,
 } from '@/components/derivatives/views';
 import { EmptyState, FilterChips } from '@/components/market-ui';
+import { Screen, ScreenHeader, useChromeInset } from '@/components/screen';
 import { Skeleton } from '@/components/skeleton';
 import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
@@ -46,7 +46,7 @@ type ViewName = (typeof VIEWS)[number];
  */
 export default function DerivativesScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
+  const bottomInset = useChromeInset();
   const now = useNow(5_000);
 
   const [symbol, setSymbol] = useState<string | null>(null);
@@ -101,38 +101,28 @@ export default function DerivativesScreen() {
   }, [activeSymbol, asset, available, liquidity, market, now, select, view]);
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.background }]}>
-      <View style={styles.column}>
+    <Screen>
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: 128 + insets.bottom }]}
+          contentContainerStyle={[styles.content, { paddingBottom: bottomInset }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={theme.primary} />
           }>
-          <View style={styles.header}>
-            <View style={styles.titleBlock}>
-              <ThemedText style={styles.title}>Derivatives</ThemedText>
-              {data ? <SyncStatus data={data} live={live} now={now} /> : null}
-            </View>
-            <View style={styles.headerActions}>
+          <ScreenHeader
+            title="Derivatives"
+            status={data ? <SyncStatus data={data} live={live} now={now} /> : null}
+            actions={[{ icon: 'trend', label: 'Refresh derivatives', onPress: refresh }]}
+            trailing={
               <Tap
                 accessibilityRole="button"
-                accessibilityLabel="Refresh derivatives"
-                onPress={refresh}
-                haptic="none"
-                style={[styles.iconButton, { borderColor: theme.border }]}>
-                <AppIcon name="trend" size={16} color={theme.textSecondary} />
-              </Tap>
-              <Tap
-                accessibilityRole="button"
-                accessibilityLabel="Select asset"
+                accessibilityLabel={`Select asset, currently ${activeSymbol ?? 'none'}`}
                 onPress={() => setSelectorOpen(true)}
                 style={[styles.assetSelect, { borderColor: theme.border, backgroundColor: theme.surface }]}>
                 <ThemedText type="smallBold">{activeSymbol ?? '—'}</ThemedText>
                 <AppIcon name="chevron" size={16} color={theme.textMuted} />
               </Tap>
-            </View>
-          </View>
+            }
+          />
 
           {error ? <ErrorNotice message={error} onRetry={refresh} /> : null}
 
@@ -156,7 +146,6 @@ export default function DerivativesScreen() {
 
           {body}
         </ScrollView>
-      </View>
 
       <BottomSheet visible={selectorOpen} title="Select asset" onClose={() => setSelectorOpen(false)}>
         <View>
@@ -196,7 +185,7 @@ export default function DerivativesScreen() {
           })}
         </View>
       </BottomSheet>
-    </View>
+    </Screen>
   );
 }
 
