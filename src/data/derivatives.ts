@@ -196,6 +196,37 @@ export type MarketOverview = {
   macro: MacroCard[];
 };
 
+/**
+ * CoinGlass' liquidation heatmap: leverage waiting to be liquidated, by price
+ * and time. Arrives downsampled — see the server's mapper for the grid maths.
+ */
+export type LiquidityMap = {
+  symbol: string;
+  exchange: string | null;
+  instrumentId: string | null;
+  updatedAt: string;
+  capturedAt: string;
+  /** Price levels, low to high; `cells` index into this. */
+  levels: number[];
+  /** Column start times, oldest first; `cells` index into this. */
+  columns: string[];
+  /** Sparse grid of [columnIndex, levelIndex, usd]. */
+  cells: [number, number, number][];
+  candles: { at: string; open: number; high: number; low: number; close: number }[];
+  /** Leverage resting at each price, summed across time. */
+  profile: { price: number; usd: number }[];
+  rangeLow: number;
+  rangeHigh: number;
+  maxCell: number;
+  price: number | null;
+};
+
+export type LiquidityMapResponse = {
+  available: string[];
+  symbol: string;
+  map: LiquidityMap;
+};
+
 export type SyncOutcome = {
   trigger: string;
   source: string | null;
@@ -216,6 +247,8 @@ export type DerivativesResponse = {
   refreshIntervalMs: number;
   lastSync: SyncOutcome | null;
   available: string[];
+  /** Symbols the service captured a liquidity map for. */
+  liquidityMaps?: string[];
   symbol: string | null;
   asset: AssetDerivatives | null;
   market: MarketOverview | null;
@@ -344,6 +377,53 @@ export function fundingVerdict(rate: number | null | undefined): string {
 }
 
 /** Long share of a long/short pair, as a percentage of the two. */
+/**
+ * The clusters a move would run into first, above and below the current price.
+ * These are the two numbers a trader actually reads off a heatmap.
+ */
+export function nearestClusters(
+  map: LiquidityMap,
+): { above: { price: number; usd: number } | null; below: { price: number; usd: number } | null } {
+  const price = map.price;
+  if (price === null) return { above: null, below: null };
+
+  // "Significant" is relative to the map: a tenth of its biggest single level.
+  const biggest = map.profile.reduce((most, level) => Math.max(most, level.usd), 0);
+  const floor = biggest * 0.1;
+  const meaningful = map.profile.filter((level) => level.usd >= floor);
+
+  const above = meaningful.filter((level) => level.price > price).at(0) ?? null;
+  const below = meaningful.filter((level) => level.price < price).at(-1) ?? null;
+  return { above, below };
+}
+
+/**
+ * Heat ramp for the map, dark to bright.
+ *
+ * Intensity is scaled by the square root of the share: liquidation clusters are
+ * extremely long-tailed, and a linear ramp leaves everything but the single
+ * biggest band black.
+ */
+export function heatColor(usd: number, max: number): string {
+  if (max <= 0 || usd <= 0) return 'rgba(56,189,248,0)';
+  const scale = Math.min(1, Math.sqrt(usd / max));
+  // Deep blue → teal → green → amber, matching how the source reads.
+  const stops: [number, number, number][] = [
+    [30, 41, 120],
+    [30, 130, 160],
+    [40, 190, 140],
+    [190, 220, 90],
+    [250, 210, 70],
+  ];
+  const position = scale * (stops.length - 1);
+  const index = Math.min(stops.length - 2, Math.floor(position));
+  const t = position - index;
+  const [r1, g1, b1] = stops[index];
+  const [r2, g2, b2] = stops[index + 1];
+  const mix = (a: number, b: number) => Math.round(a + (b - a) * t);
+  return `rgb(${mix(r1, r2)}, ${mix(g1, g2)}, ${mix(b1, b2)})`;
+}
+
 export function longShare(longUsd: number, shortUsd: number): number {
   const total = longUsd + shortUsd;
   return total > 0 ? (longUsd / total) * 100 : 50;

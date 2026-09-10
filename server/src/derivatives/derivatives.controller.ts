@@ -50,10 +50,31 @@ export class DerivativesController {
       refreshIntervalMs: this.scheduler.refreshIntervalMs,
       lastSync: this.derivatives.lastSync,
       available,
+      /** Symbols with a liquidity map, so the app knows whether to offer one. */
+      liquidityMaps: this.derivatives.mappedSymbols,
       symbol: asset?.summary.symbol ?? symbol ?? null,
       asset,
       market: this.derivatives.market,
     };
+  }
+
+  @Get('liquidity-map')
+  @ApiOperation({
+    summary: "CoinGlass' liquidation heatmap: leverage waiting to be liquidated, by price and time.",
+  })
+  @ApiOkResponse({ description: 'The downsampled grid, its price profile and the candles under it.' })
+  liquidityMap(@Query() query: DerivativesQueryDto) {
+    const available = this.derivatives.mappedSymbols;
+    const symbol = query.symbol ?? available[0];
+    const map = symbol ? this.derivatives.liquidityMap(symbol) : null;
+    if (!map) {
+      throw new NotFoundException(
+        available.length
+          ? `no liquidity map for ${symbol}; available: ${available.join(', ')}`
+          : 'no liquidity map captured yet',
+      );
+    }
+    return { available, symbol: map.symbol, map };
   }
 
   @Get('assets')

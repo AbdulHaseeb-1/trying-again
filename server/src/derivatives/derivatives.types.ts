@@ -248,6 +248,43 @@ export type MarketOverview = {
   macro: MacroCard[];
 };
 
+/**
+ * The liquidation heatmap — CoinGlass' "liquidity map".
+ *
+ * A grid of leverage waiting to be liquidated: time across, price up, and how
+ * many dollars of positions would be forced out at each square. The bright
+ * bands are where a move would find fuel.
+ *
+ * Shipped downsampled. CoinGlass serves ~15k cells over 288 five-minute
+ * columns and 132 price levels; a phone neither needs nor can draw that, so the
+ * grid is aggregated to `columns` x `levels` and the intensities are summed.
+ */
+export type LiquidityMap = {
+  symbol: string;
+  /** Which contract the map is drawn for — CoinGlass picks one, not an index. */
+  exchange: string | null;
+  instrumentId: string | null;
+  /** CoinGlass' own timestamp for the map, not when we scraped it. */
+  updatedAt: string;
+  capturedAt: string;
+  /** Price levels, low to high. `cells` index into this. */
+  levels: number[];
+  /** Column start times, oldest first. `cells` index into this. */
+  columns: string[];
+  /** Sparse grid: [columnIndex, levelIndex, usd]. Empty squares are omitted. */
+  cells: [number, number, number][];
+  /** The price action the map is drawn under. */
+  candles: { at: string; open: number; high: number; low: number; close: number }[];
+  /** Leverage resting at each price, summed across time — the map's histogram. */
+  profile: { price: number; usd: number }[];
+  /** Bounds of the levels the map actually covers, not of CoinGlass' viewport. */
+  rangeLow: number;
+  rangeHigh: number;
+  maxCell: number;
+  /** Latest close from the candles, for "where is price now" markers. */
+  price: number | null;
+};
+
 export type SourceName = 'coinglass-scrape';
 
 /** What one page of the scrape produced — surfaced so a partial run is visible. */
@@ -268,6 +305,8 @@ export type DerivativesSnapshot = {
   durationMs: number;
   market: MarketOverview | null;
   assets: AssetDerivatives[];
+  /** One per instrument CoinGlass serves a heatmap for. */
+  liquidityMaps: LiquidityMap[];
   pages: PageReport[];
 };
 

@@ -49,6 +49,9 @@ See [`server/README.md`](server/README.md) for the architecture and configuratio
   encrypts its API payloads and decodes them in the browser, so the scraper
   loads the page and harvests what the page itself decoded rather than parsing
   the DOM.
+- **Liquidity map** — CoinGlass' liquidation heatmap: how much leveraged money
+  would be forced out at each price, drawn under the price line. Summed down
+  server-side to a grid a phone can draw.
 - **History** — an optional Postgres archive (Prisma) behind both. Each sync
   writes only what it had not already stored, so the past accumulates without
   being rewritten, and past releases come back out of the database instead of

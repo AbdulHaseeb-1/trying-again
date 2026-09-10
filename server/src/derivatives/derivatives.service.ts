@@ -21,6 +21,7 @@ import { DerivativesStore } from './derivatives.store';
 import type {
   AssetDerivatives,
   DerivativesSnapshot,
+  LiquidityMap,
   MarketOverview,
   SyncOutcome,
   SyncTrigger,
@@ -201,6 +202,15 @@ export class DerivativesService {
 
   get market(): MarketOverview | null {
     return this.store.market;
+  }
+
+  liquidityMap(symbol: string): LiquidityMap | null {
+    return this.store.liquidityMap(symbol);
+  }
+
+  /** Symbols CoinGlass served a heatmap for — today, just BTC. */
+  get mappedSymbols(): string[] {
+    return this.store.mappedSymbols;
   }
 
   get pages(): DerivativesSnapshot['pages'] {

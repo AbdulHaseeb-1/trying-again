@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 
-import type { DerivativesResponse } from '@/data/derivatives';
+import type { DerivativesResponse, LiquidityMapResponse } from '@/data/derivatives';
 
 /**
  * Base URL of the market-data service.
@@ -50,6 +50,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export function fetchDerivatives(symbol?: string, signal?: AbortSignal): Promise<DerivativesResponse> {
   const query = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
   return request<DerivativesResponse>(`/api/derivatives${query}`, { signal });
+}
+
+/**
+ * The liquidation heatmap for one symbol. Fetched on its own rather than with
+ * the overview: it is tens of kilobytes and only one view ever draws it.
+ */
+export function fetchLiquidityMap(symbol?: string, signal?: AbortSignal): Promise<LiquidityMapResponse> {
+  const query = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+  return request<LiquidityMapResponse>(`/api/derivatives/liquidity-map${query}`, { signal });
 }
 
 /** Ask the service to scrape now instead of waiting for its interval. */

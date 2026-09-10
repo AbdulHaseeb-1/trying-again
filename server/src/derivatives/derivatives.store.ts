@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 
-import type { AssetDerivatives, DerivativesSnapshot, MarketOverview } from './derivatives.types';
+import type {
+  AssetDerivatives,
+  DerivativesSnapshot,
+  LiquidityMap,
+  MarketOverview,
+} from './derivatives.types';
 
 export type MergeReport = {
   /** Assets whose breakdown this merge replaced. */
@@ -8,6 +13,8 @@ export type MergeReport = {
   /** Assets the incoming snapshot did not cover, so the old copy stands. */
   retained: string[];
   marketUpdated: boolean;
+  /** Symbols whose liquidity map this merge replaced. */
+  mapsUpdated: string[];
 };
 
 /**
@@ -23,13 +30,14 @@ export type MergeReport = {
 @Injectable()
 export class DerivativesStore {
   private assets = new Map<string, AssetDerivatives>();
+  private maps = new Map<string, LiquidityMap>();
   private overview: MarketOverview | null = null;
   private capturedAt: string | null = null;
   private lastChangedAt: string | null = null;
   private pages: DerivativesSnapshot['pages'] = [];
 
   merge(snapshot: DerivativesSnapshot): MergeReport {
-    const report: MergeReport = { updated: [], retained: [], marketUpdated: false };
+    const report: MergeReport = { updated: [], retained: [], marketUpdated: false, mapsUpdated: [] };
 
     for (const asset of snapshot.assets) {
       this.assets.set(asset.summary.symbol, asset);
@@ -44,9 +52,15 @@ export class DerivativesStore {
       report.marketUpdated = true;
     }
 
+    // A heatmap page that failed leaves the previous map standing, like assets.
+    for (const map of snapshot.liquidityMaps ?? []) {
+      this.maps.set(map.symbol, map);
+      report.mapsUpdated.push(map.symbol);
+    }
+
     this.pages = snapshot.pages;
     this.capturedAt = snapshot.capturedAt;
-    if (report.updated.length || report.marketUpdated) {
+    if (report.updated.length || report.marketUpdated || report.mapsUpdated.length) {
       this.lastChangedAt = new Date().toISOString();
     }
     return report;
@@ -57,6 +71,9 @@ export class DerivativesStore {
     for (const asset of snapshot.assets) {
       if (!this.assets.has(asset.summary.symbol)) this.assets.set(asset.summary.symbol, asset);
     }
+    for (const map of snapshot.liquidityMaps ?? []) {
+      if (!this.maps.has(map.symbol)) this.maps.set(map.symbol, map);
+    }
     this.overview ??= snapshot.market;
     this.capturedAt ??= snapshot.capturedAt;
     this.pages = this.pages.length ? this.pages : snapshot.pages;
@@ -65,6 +82,15 @@ export class DerivativesStore {
 
   asset(symbol: string): AssetDerivatives | null {
     return this.assets.get(symbol.toUpperCase()) ?? null;
+  }
+
+  liquidityMap(symbol: string): LiquidityMap | null {
+    return this.maps.get(symbol.toUpperCase()) ?? null;
+  }
+
+  /** Symbols a map exists for — a short list, and not the tracked assets. */
+  get mappedSymbols(): string[] {
+    return [...this.maps.keys()];
   }
 
   all(): AssetDerivatives[] {
@@ -99,6 +125,7 @@ export class DerivativesStore {
       durationMs: 0,
       market: this.overview,
       assets: this.all(),
+      liquidityMaps: [...this.maps.values()],
       pages: this.pages,
     };
   }

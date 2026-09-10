@@ -8,6 +8,7 @@ import {
   buildSnapshot,
   num,
   toLiquidationOrder,
+  toLiquidityMap,
   toVenue,
   type HarvestBundle,
   type MapperLimits,
@@ -15,7 +16,13 @@ import {
 import { DerivativesStore } from '../src/derivatives/derivatives.store';
 import type { AssetDerivatives, DerivativesSnapshot } from '../src/derivatives/derivatives.types';
 
-const limits: MapperLimits = { maxOrders: 10, maxScreenerRows: 10, maxSeriesPoints: 3 };
+const limits: MapperLimits = {
+  maxOrders: 10,
+  maxScreenerRows: 10,
+  maxSeriesPoints: 3,
+  maxHeatmapColumns: 4,
+  maxHeatmapLevels: 3,
+};
 
 const venueRow = {
   exName: 'Binance',
@@ -345,6 +352,7 @@ const snapshot = (assets: AssetDerivatives[], market: DerivativesSnapshot['marke
   durationMs: 1,
   market,
   assets,
+  liquidityMaps: [],
   pages: [],
 });
 
@@ -376,4 +384,93 @@ test('symbols are looked up case-insensitively', () => {
   const store = new DerivativesStore();
   store.merge(snapshot([asset('BTC', 1)]));
   assert.equal(store.asset('btc')?.summary.symbol, 'BTC');
+});
+
+// ------------------------------------------------------------- liquidity map
+
+const heatmap = {
+  instrument: { exName: 'Binance', instrumentId: 'BTCUSDT' },
+  updateTime: 1_789_028_708_278,
+  rangeLow: 69_732.4,
+  rangeHigh: 87_919.5,
+  // Four price levels, four columns — small enough to check by hand.
+  y: [70_000, 71_000, 72_000, 73_000],
+  prices: [
+    [1_789_000_000, '78000', '78100', '77900', '78050', '10'],
+    [1_789_000_300, '78050', '78200', '78000', '78150', '11'],
+    [1_789_000_600, '78150', '78300', '78100', '78250', '12'],
+    [1_789_000_900, '78250', '78400', '78200', '78350', '13'],
+  ],
+  liq: [
+    [0, 0, 1_000],
+    [1, 0, 2_000],
+    [0, 1, 500],
+    [3, 3, 7_000],
+  ],
+};
+
+test('the heatmap is summed into a coarser grid, not sampled down', () => {
+  // Two columns and two levels: each output cell covers a 2x2 block.
+  const map = toLiquidityMap(heatmap, {
+    symbol: 'BTC',
+    limits: { ...limits, maxHeatmapColumns: 2, maxHeatmapLevels: 2 },
+    capturedAt: '2026-09-10T08:00:00.000Z',
+  })!;
+
+  assert.equal(map.columns.length, 2);
+  assert.equal(map.levels.length, 2);
+  const corner = map.cells.find(([column, level]) => column === 0 && level === 0);
+  assert.equal(corner?.[2], 3_500, '1000 + 2000 + 500 all land in the first block');
+  assert.equal(map.cells.find(([c, l]) => c === 1 && l === 1)?.[2], 7_000);
+  assert.equal(map.maxCell, 7_000);
+
+  // Prices are the midpoint of the levels they cover.
+  assert.equal(map.levels[0], 70_500);
+  assert.equal(map.levels[1], 72_500);
+});
+
+test('the price profile keeps full resolution and the candles come along', () => {
+  const map = toLiquidityMap(heatmap, {
+    symbol: 'BTC',
+    limits: { ...limits, maxHeatmapColumns: 2, maxHeatmapLevels: 2 },
+    capturedAt: '2026-09-10T08:00:00.000Z',
+  })!;
+
+  assert.deepEqual(
+    map.profile,
+    [
+      { price: 70_000, usd: 3_000 },
+      { price: 71_000, usd: 500 },
+      { price: 73_000, usd: 7_000 },
+    ],
+    'summed across time, at the levels CoinGlass gave — not the downsampled ones',
+  );
+  assert.equal(map.candles.length, 2, 'candles collapse onto the same columns as the grid');
+  assert.equal(map.candles[0].open, 78_000, 'a column opens where its first candle opened…');
+  assert.equal(map.candles[0].close, 78_150, '…and closes where its last one closed');
+  assert.equal(map.candles[0].high, 78_200);
+  assert.equal(map.candles[0].low, 77_900);
+  assert.equal(map.price, 78_350, 'the latest close, for the "you are here" marker');
+  assert.equal(map.exchange, 'Binance');
+  assert.equal(map.updatedAt, new Date(1_789_028_708_278).toISOString());
+  // The payload's own range (69,732–87,919) is the chart's viewport; the map
+  // only covers the levels it was given.
+  assert.equal(map.rangeLow, 70_500);
+  assert.equal(map.rangeHigh, 72_500);
+});
+
+test('a heatmap payload with no cells is not a map', () => {
+  assert.equal(
+    toLiquidityMap({ ...heatmap, liq: [] }, { symbol: 'BTC', limits, capturedAt: 'x' }),
+    null,
+  );
+  assert.equal(
+    toLiquidityMap({ ...heatmap, prices: [] }, { symbol: 'BTC', limits, capturedAt: 'x' }),
+    null,
+  );
+});
+
+test('a heatmap page is recognised by its grid', () => {
+  assert.equal(classify(heatmap)?.kind, 'liquidity-map');
+  assert.equal(classify({ liq: [], y: [] }), null, 'a grid needs its candles too');
 });

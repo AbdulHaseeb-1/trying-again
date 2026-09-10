@@ -13,6 +13,7 @@ import {
   StatGrid,
   WindowStrip,
 } from '@/components/derivatives/primitives';
+import { HeatLegend, LiquidityHeatmap } from '@/components/derivatives/liquidity-heatmap';
 import { VenueList } from '@/components/derivatives/venue-list';
 import { FilterChips, LineChart, toneColor } from '@/components/market-ui';
 import { Tap } from '@/components/tap';
@@ -34,10 +35,12 @@ import {
   fundingTone,
   fundingVerdict,
   longShare,
+  nearestClusters,
   positioningNote,
   ratioToLongPercent,
   type AssetDerivatives,
   type LiquidationWindow,
+  type LiquidityMap,
   type MarketOverview,
 } from '@/data/derivatives';
 import { useTheme } from '@/hooks/use-theme';
@@ -454,6 +457,127 @@ export function LiquidationsView({ asset, market, now }: ViewProps) {
           ) : null}
         </>
       ) : null}
+    </>
+  );
+}
+
+// ------------------------------------------------------------- liquidity map
+
+export function LiquidityView({
+  map,
+  loading,
+  error,
+  unavailable,
+  symbol,
+  now,
+}: {
+  map: LiquidityMap | null;
+  loading: boolean;
+  error: string | null;
+  unavailable: boolean;
+  symbol: string;
+  now: number;
+}) {
+  const theme = useTheme();
+
+  if (unavailable) {
+    return (
+      <Card title="Liquidity map">
+        <Note>
+          CoinGlass publishes its liquidation heatmap for BTC/USDT on the open site only — there is no
+          map for {symbol}. Switch to BTC to see it.
+        </Note>
+      </Card>
+    );
+  }
+
+  if (error) {
+    return (
+      <Card title="Liquidity map">
+        <ThemedText type="small" style={{ color: theme.warning }}>{error}</ThemedText>
+      </Card>
+    );
+  }
+
+  if (!map) {
+    return (
+      <Card title="Liquidity map">
+        <Note>{loading ? 'Loading the heatmap…' : 'No heatmap captured yet.'}</Note>
+      </Card>
+    );
+  }
+
+  const { above, below } = nearestClusters(map);
+  const biggest = map.profile.reduce(
+    (most, level) => (level.usd > most.usd ? level : most),
+    map.profile[0] ?? { price: 0, usd: 0 },
+  );
+  const total = map.profile.reduce((sum, level) => sum + level.usd, 0);
+  // Two decimals: the nearest cluster is often a fraction of a percent away,
+  // and "+0.0%" would read as "right here" when it is not.
+  const distance = (price: number | undefined) =>
+    price === undefined || map.price === null ? '—' : formatPercent(((price - map.price) / map.price) * 100, 2);
+
+  return (
+    <>
+      <KeyMetric
+        label={`Leverage on the map (${map.symbol})`}
+        value={formatUsd(total)}
+        change={map.price === null ? undefined : formatPrice(map.price)}
+        note={`${map.exchange ?? 'CoinGlass'} ${map.instrumentId ?? ''} · updated ${formatAgo(map.updatedAt, now)}`}
+      />
+
+      <Card title="Liquidation heatmap">
+        <LiquidityHeatmap map={map} />
+        <HeatLegend max={map.maxCell} />
+        <Note>
+          Brighter is more leverage waiting to be liquidated at that price. The line is price over the
+          same window — bands it has not reached are the ones that would feed a move.
+        </Note>
+      </Card>
+
+      <Card title="Nearest clusters">
+        <DataRow
+          label={above ? `Above · ${formatPrice(above.price)}` : 'Above'}
+          value={formatUsd(above?.usd)}
+          note={distance(above?.price)}
+          tone="positive"
+        />
+        <DataRow
+          label={below ? `Below · ${formatPrice(below.price)}` : 'Below'}
+          value={formatUsd(below?.usd)}
+          note={distance(below?.price)}
+          tone="negative"
+        />
+        <Divider />
+        <DataRow label="Densest band" value={formatPrice(biggest.price)} note={formatUsd(biggest.usd)} />
+        <DataRow
+          label="Mapped range"
+          value={`${formatPrice(map.rangeLow)} – ${formatPrice(map.rangeHigh)}`}
+        />
+        <Note>
+          A cluster is a price level holding at least a tenth of the densest band on the map, so
+          small scatter does not count as a magnet.
+        </Note>
+      </Card>
+
+      <Card title="Leverage by price">
+        {[...map.profile]
+          .sort((a, b) => b.usd - a.usd)
+          .slice(0, 10)
+          .map((level) => (
+            <View key={level.price} style={styles.coinRow}>
+              <DataRow
+                label={formatPrice(level.price)}
+                value={formatUsd(level.usd)}
+                note={distance(level.price)}
+                tone={map.price !== null && level.price > map.price ? 'positive' : 'negative'}
+              />
+              <ShareBar percent={(level.usd / Math.max(biggest.usd, 1)) * 100} />
+            </View>
+          ))}
+        <Note>The ten densest levels, summed across the window, and how far each sits from price.</Note>
+      </Card>
     </>
   );
 }

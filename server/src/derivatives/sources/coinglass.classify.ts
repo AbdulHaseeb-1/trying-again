@@ -29,7 +29,8 @@ export type ClassifiedKind =
   | 'macro-cards'
   | 'volume-by-exchange'
   | 'net-flows'
-  | 'coin-prices';
+  | 'coin-prices'
+  | 'liquidity-map';
 
 export type Classified = { kind: ClassifiedKind; value: RawRecord | RawRecord[] };
 
@@ -72,6 +73,11 @@ export function classify(value: unknown): Classified | null {
   if (isRecord(value)) {
     // Some endpoints are read straight off the envelope's decoded `data`.
     const unwrapped = 'code' in value && isRecord(value.data) ? (value.data as RawRecord) : value;
+
+    // The heatmap: a sparse grid, its price axis, and the candles under it.
+    if (Array.isArray(unwrapped.liq) && Array.isArray(unwrapped.y) && Array.isArray(unwrapped.prices)) {
+      return { kind: 'liquidity-map', value: unwrapped };
+    }
 
     if (has(unwrapped, 'symbol', 'openInterest', 'futuresVolUsd', 'marketCap')) {
       return { kind: 'coin-info', value: unwrapped };

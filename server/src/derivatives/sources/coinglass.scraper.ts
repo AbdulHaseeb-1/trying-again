@@ -45,11 +45,13 @@ export class CoinglassScraper {
   }
 
   private get limits(): MapperLimits {
-    const { scraper } = this.config;
+    const { scraper, heatmap } = this.config;
     return {
       maxOrders: scraper.maxOrders,
       maxScreenerRows: scraper.maxScreenerRows,
       maxSeriesPoints: scraper.maxSeriesPoints,
+      maxHeatmapColumns: heatmap.maxColumns,
+      maxHeatmapLevels: heatmap.maxLevels,
     };
   }
 
@@ -65,6 +67,18 @@ export class CoinglassScraper {
         url: `${baseUrl}/currencies/${symbol}`,
         symbol,
       })),
+      // The liquidation heatmap: leverage waiting to be liquidated, by price.
+      // BTC is the page's default, so it needs no query at all.
+      ...(this.config.heatmap.enabled
+        ? this.config.heatmap.symbols.map((symbol) => ({
+            page: `heatmap:${symbol}`,
+            url:
+              symbol === 'BTC'
+                ? `${baseUrl}/pro/futures/LiquidationHeatMap`
+                : `${baseUrl}/pro/futures/LiquidationHeatMap?coin=${symbol}`,
+            symbol,
+          }))
+        : []),
     ];
   }
 
@@ -117,7 +131,9 @@ export class CoinglassScraper {
     });
 
     this.logger.log(
-      `scraped ${snapshot.assets.length}/${assets.length} assets and ${snapshot.market?.screener.length ?? 0} screener rows in ${snapshot.durationMs}ms`,
+      `scraped ${snapshot.assets.length}/${assets.length} assets, ` +
+        `${snapshot.market?.screener.length ?? 0} screener rows and ` +
+        `${snapshot.liquidityMaps.length} liquidity map(s) in ${snapshot.durationMs}ms`,
     );
     return snapshot;
   }

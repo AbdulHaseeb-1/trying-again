@@ -135,6 +135,25 @@ export const derivativesConfig = registerAs('derivatives', () => ({
     maxSeriesPoints: int(process.env.COINGLASS_MAX_SERIES_POINTS, 240),
   },
 
+  /**
+   * The liquidation heatmap — CoinGlass' "liquidity map".
+   *
+   * Only the instruments listed here are fetched, and only BTC works on the
+   * free site today: the page reads `?coin=`, but its API answers `40000` for
+   * anything else, so a wider list would just log failures. It stays a list so
+   * that changes on their side need a config change, not a code change.
+   */
+  heatmap: {
+    enabled: bool(process.env.COINGLASS_HEATMAP_ENABLED, true),
+    symbols: (process.env.COINGLASS_HEATMAP_SYMBOLS ?? 'BTC')
+      .split(',')
+      .map((symbol) => symbol.trim().toUpperCase())
+      .filter(Boolean),
+    /** The grid the raw ~15k cells are summed into before they leave here. */
+    maxColumns: int(process.env.COINGLASS_HEATMAP_COLUMNS, 60),
+    maxLevels: int(process.env.COINGLASS_HEATMAP_LEVELS, 40),
+  },
+
   snapshot: {
     enabled: bool(process.env.DERIVATIVES_SNAPSHOT_ENABLED, true),
     path: process.env.DERIVATIVES_SNAPSHOT_PATH ?? 'data/derivatives-snapshot.json',

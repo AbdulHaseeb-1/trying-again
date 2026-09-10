@@ -250,6 +250,7 @@ function sampleSnapshot(capturedAt: string, newPoints = 0): DerivativesSnapshot 
       fundingLowest: [],
       macro: [],
     },
+    liquidityMaps: [],
     pages: [],
   };
 }

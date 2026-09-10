@@ -193,6 +193,7 @@ const snapshot = (capturedAt: string, overrides: Partial<DerivativesSnapshot> = 
     fundingLowest: [],
     macro: [],
   },
+  liquidityMaps: [],
   pages: [],
   ...overrides,
 });

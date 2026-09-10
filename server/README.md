@@ -162,6 +162,7 @@ market-wide screener of ~1,000 coins.
 | `POST` | `/api/derivatives/refresh`  | Scrape now, bypassing the interval |
 | `POST` | `/api/derivatives/config`   | Retune `refreshIntervalMs` live |
 | `GET`  | `/api/derivatives/history`  | One archived series (`?series=asset\|venues\|funding\|prices\|liquidations\|market\|coins`) |
+| `GET`  | `/api/derivatives/liquidity-map` | The liquidation heatmap: leverage waiting to be liquidated, by price and time |
 | `GET`  | `/api/derivatives/stream`   | SSE stream of `sync` events |
 
 ## How the data gets in
@@ -193,11 +194,44 @@ Three details make it work and are easy to lose:
 
 A run visits the home page (market totals, screener, funding extremes, macro
 cards), the liquidation page (windows, venues, coins, the largest order and the
-live feed) and one page per tracked coin (venue table, funding history, price
-history, spot flow). Pages are independent, and each one's outcome is reported
+live feed), one page per tracked coin (venue table, funding history, price
+history, spot flow) and the heatmap page (the liquidity map, below). Pages are independent, and each one's outcome is reported
 in `/api/derivatives/status`, so a partial run is visible rather than silently
 thin. The store merges per asset, so a page that fails leaves the previous
 numbers standing instead of blanking a screen that was correct a minute ago.
+
+### The liquidity map
+
+`/pro/futures/LiquidationHeatMap` renders CoinGlass' liquidation heatmap, and
+the payload behind it is a grid: ~15,000 sparse cells over 288 five-minute
+columns and 132 price levels, plus the candles the chart draws over them. Each
+cell is the dollar value of leveraged positions that would be liquidated at that
+price, at that time — the bright bands are where a move would find fuel.
+
+Two things shape how it is served:
+
+- **It is downsampled before it leaves.** Nothing on a phone resolves 15,000
+  cells, and shipping them costs a third of a megabyte per read, so neighbouring
+  squares are *summed* (not sampled) into roughly 60x40 —
+  `COINGLASS_HEATMAP_COLUMNS` / `_LEVELS`. The price profile keeps full level
+  resolution, because "which price holds the most" is the question the map is
+  usually asked. The result is about 40 KB, and it is served from its own
+  endpoint rather than the overview so the 60-second poll stays lean.
+- **BTC only, for now.** The page reads `?coin=`, but its API answers `40000`
+  for anything except `Binance_BTCUSDT` on the open site, and neither a deep
+  link nor a client-side route change gets past that. `COINGLASS_HEATMAP_SYMBOLS`
+  is a list so a change on their side needs a config edit rather than a code
+  one; the app says plainly that other coins have no map rather than showing an
+  empty chart.
+
+CoinGlass' own `rangeLow`/`rangeHigh` describe the chart's viewport, which is
+wider than the grid it fills, so the mapper reports the span of the levels that
+actually carry data instead.
+
+The map is not archived. It is a derived picture of positions open *right now* —
+it changes wholesale every few minutes, and a history of it would be large
+without answering a question the funding, open-interest and liquidation series
+do not already answer better.
 
 ### Where CoinGlass contradicts itself
 
@@ -228,6 +262,8 @@ npx tsx scripts/scrape-coinglass.ts seed/derivatives-snapshot.json BTC,ETH,SOL
 | `COINGLASS_SETTLE_MS` | `12000` | How long to let a page keep answering |
 | `COINGLASS_SETTLE_QUIET_MS` | `2500` | Quiet gap that ends a page early |
 | `COINGLASS_MAX_ORDERS` / `_SCREENER_ROWS` / `_SERIES_POINTS` | `60` / `100` / `240` | Caps on the firehose endpoints |
+| `COINGLASS_HEATMAP_SYMBOLS` | `BTC` | Instruments to fetch the liquidity map for |
+| `COINGLASS_HEATMAP_COLUMNS` / `_LEVELS` | `60` / `40` | Grid the heatmap is summed down to |
 
 # The archive
 

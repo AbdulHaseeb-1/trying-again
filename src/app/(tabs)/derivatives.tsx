@@ -9,6 +9,7 @@ import { SyncStatus } from '@/components/derivatives/sync-status';
 import {
   FundingView,
   LiquidationsView,
+  LiquidityView,
   MarketView,
   OpenInterestView,
   OverviewView,
@@ -22,9 +23,18 @@ import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { formatPercent, formatPrice, formatUsd } from '@/data/derivatives';
 import { useNow } from '@/hooks/use-calendar';
 import { useDerivatives } from '@/hooks/use-derivatives';
+import { useLiquidityMap } from '@/hooks/use-liquidity-map';
 import { useTheme } from '@/hooks/use-theme';
 
-const VIEWS = ['Overview', 'Open Interest', 'Funding', 'Liquidations', 'Positioning', 'Market'] as const;
+const VIEWS = [
+  'Overview',
+  'Open Interest',
+  'Funding',
+  'Liquidations',
+  'Liquidity Map',
+  'Positioning',
+  'Market',
+] as const;
 type ViewName = (typeof VIEWS)[number];
 
 /**
@@ -52,6 +62,14 @@ export default function DerivativesScreen() {
   const market = data?.market ?? null;
   const activeSymbol = asset?.summary.symbol ?? symbol ?? data?.symbol ?? null;
 
+  // The heatmap is fetched only while its view is open: it is far bigger than
+  // the rest of the payload and nothing else draws it.
+  const liquidity = useLiquidityMap(
+    activeSymbol,
+    view === 'Liquidity Map',
+    data?.refreshIntervalMs ?? 60_000,
+  );
+
   const select = useCallback((next: string) => {
     setSymbol(next);
     setSelectorOpen(false);
@@ -61,6 +79,18 @@ export default function DerivativesScreen() {
     if (view === 'Market') {
       return <MarketView market={market} available={available} onSelect={select} />;
     }
+    if (view === 'Liquidity Map') {
+      return (
+        <LiquidityView
+          map={liquidity.map}
+          loading={liquidity.loading}
+          error={liquidity.error}
+          unavailable={liquidity.unavailable}
+          symbol={activeSymbol ?? '—'}
+          now={now}
+        />
+      );
+    }
     if (!asset) return null;
     const props = { asset, market, now };
     if (view === 'Open Interest') return <OpenInterestView {...props} />;
@@ -68,7 +98,7 @@ export default function DerivativesScreen() {
     if (view === 'Liquidations') return <LiquidationsView {...props} />;
     if (view === 'Positioning') return <PositioningView {...props} />;
     return <OverviewView {...props} />;
-  }, [asset, available, market, now, select, view]);
+  }, [activeSymbol, asset, available, liquidity, market, now, select, view]);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -110,7 +140,7 @@ export default function DerivativesScreen() {
 
           {loading && !data ? <DerivativesSkeleton /> : null}
 
-          {!loading && !asset && view !== 'Market' ? (
+          {!loading && !asset && view !== 'Market' && view !== 'Liquidity Map' ? (
             <EmptyState
               icon="chart"
               title="No derivatives data yet"

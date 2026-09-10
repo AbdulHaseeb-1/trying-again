@@ -4,6 +4,7 @@ import type {
   AssetSummary,
   DerivativesSnapshot,
   FundingExtreme,
+  LiquidityMap,
   FundingPoint,
   LiquidationBucket,
   LiquidationOrder,
@@ -29,6 +30,9 @@ export type MapperLimits = {
   maxOrders: number;
   maxScreenerRows: number;
   maxSeriesPoints: number;
+  /** Grid the heatmap is downsampled to before it leaves the server. */
+  maxHeatmapColumns: number;
+  maxHeatmapLevels: number;
 };
 
 // ------------------------------------------------------------------ coercion
@@ -468,6 +472,114 @@ export function buildMarketOverview(
   };
 }
 
+// ------------------------------------------------------------- liquidity map
+
+/**
+ * Fold CoinGlass' heatmap into a grid a phone can draw.
+ *
+ * The raw map is ~15,000 cells across 288 five-minute columns and 132 price
+ * levels. Nothing on a phone screen resolves that, and shipping it would cost
+ * a third of a megabyte per read, so neighbouring squares are summed into a
+ * coarser grid. Summing (rather than sampling) is what keeps the total dollar
+ * figure honest: every cell in a group still counts towards the group.
+ */
+export function toLiquidityMap(
+  raw: RawRecord,
+  options: { symbol: string; limits: MapperLimits; capturedAt: string },
+): LiquidityMap | null {
+  const rawCells = Array.isArray(raw.liq) ? (raw.liq as unknown[]) : [];
+  const rawLevels = (Array.isArray(raw.y) ? (raw.y as unknown[]) : []).map(num);
+  const rawColumns = Array.isArray(raw.prices) ? (raw.prices as unknown[]) : [];
+  if (!rawCells.length || !rawLevels.length || !rawColumns.length) return null;
+
+  const candles = rawColumns.flatMap((entry) => {
+    if (!Array.isArray(entry) || entry.length < 5) return [];
+    const at = iso(entry[0]);
+    const [open, high, low, close] = [num(entry[1]), num(entry[2]), num(entry[3]), num(entry[4])];
+    if (!at || open === null || high === null || low === null || close === null) return [];
+    return [{ at, open, high, low, close }];
+  });
+  if (!candles.length) return null;
+
+  const columnGroup = Math.max(1, Math.ceil(candles.length / options.limits.maxHeatmapColumns));
+  const levelGroup = Math.max(1, Math.ceil(rawLevels.length / options.limits.maxHeatmapLevels));
+
+  // A group's price is its midpoint, and its time is when the group opens.
+  const levels: number[] = [];
+  for (let index = 0; index < rawLevels.length; index += levelGroup) {
+    const group = rawLevels.slice(index, index + levelGroup).filter((value): value is number => value !== null);
+    if (group.length) levels.push(group.reduce((total, value) => total + value, 0) / group.length);
+  }
+
+  // Candles collapse onto the same grid: one per column, so the price line and
+  // the heatmap share an x-axis and the payload does not carry 288 rows the
+  // chart could not draw separately anyway.
+  const grouped: LiquidityMap['candles'] = [];
+  for (let index = 0; index < candles.length; index += columnGroup) {
+    const group = candles.slice(index, index + columnGroup);
+    grouped.push({
+      at: group[0].at,
+      open: group[0].open,
+      high: Math.max(...group.map((candle) => candle.high)),
+      low: Math.min(...group.map((candle) => candle.low)),
+      close: group[group.length - 1].close,
+    });
+  }
+  const columns = grouped.map((candle) => candle.at);
+
+  const grid = new Map<string, number>();
+  const profileByLevel = new Map<number, number>();
+  for (const entry of rawCells) {
+    if (!Array.isArray(entry) || entry.length < 3) continue;
+    const column = num(entry[0]);
+    const level = num(entry[1]);
+    const usd = num(entry[2]);
+    if (column === null || level === null || usd === null) continue;
+
+    const x = Math.floor(column / columnGroup);
+    const y = Math.floor(level / levelGroup);
+    if (x >= columns.length || y >= levels.length) continue;
+    grid.set(`${x}:${y}`, (grid.get(`${x}:${y}`) ?? 0) + usd);
+    // The profile keeps full price resolution: it is cheap and it is the view
+    // that answers "where would a move find fuel".
+    profileByLevel.set(level, (profileByLevel.get(level) ?? 0) + usd);
+  }
+  if (!grid.size) return null;
+
+  const cells: [number, number, number][] = [...grid.entries()].map(([key, usd]) => {
+    const [x, y] = key.split(':');
+    return [Number(x), Number(y), Math.round(usd)];
+  });
+
+  const profile = [...profileByLevel.entries()]
+    .flatMap(([level, usd]) => {
+      const price = rawLevels[level];
+      return price === null || price === undefined ? [] : [{ price, usd: Math.round(usd) }];
+    })
+    .sort((a, b) => a.price - b.price);
+
+  const instrument = (raw.instrument ?? null) as RawRecord | null;
+  return {
+    symbol: options.symbol,
+    exchange: str(instrument?.exName),
+    instrumentId: str(instrument?.instrumentId),
+    updatedAt: iso(raw.updateTime) ?? options.capturedAt,
+    capturedAt: options.capturedAt,
+    levels,
+    columns,
+    cells,
+    candles: grouped,
+    profile,
+    // CoinGlass' own `rangeLow`/`rangeHigh` describe its chart viewport, which
+    // is wider than the grid it actually fills — reporting those would claim
+    // the map covers prices it holds nothing for. The levels are the truth.
+    rangeLow: levels[0],
+    rangeHigh: levels[levels.length - 1],
+    maxCell: cells.reduce((highest, cell) => Math.max(highest, cell[2]), 0),
+    price: grouped.at(-1)?.close ?? null,
+  };
+}
+
 // -------------------------------------------------------------------- assets
 
 function buildSummary(
@@ -659,12 +771,28 @@ export function buildSnapshot(
     .map((symbol) => buildAsset(symbol, bundles, options.limits, options.capturedAt))
     .filter((asset): asset is AssetDerivatives => asset !== null);
 
+  // Heatmaps come from their own page, so they are keyed by that page's symbol
+  // rather than by the tracked-asset list.
+  const liquidityMaps = bundles
+    .filter((bundle) => bundle.symbol !== null && bundle.page.startsWith('heatmap:'))
+    .flatMap((bundle) => {
+      const raw = pickOne([bundle], 'liquidity-map');
+      if (!raw) return [];
+      const map = toLiquidityMap(raw, {
+        symbol: bundle.symbol as string,
+        limits: options.limits,
+        capturedAt: options.capturedAt,
+      });
+      return map ? [map] : [];
+    });
+
   return {
     capturedAt: options.capturedAt,
     source: 'coinglass-scrape',
     durationMs: options.durationMs,
     market: buildMarketOverview(bundles, options.limits),
     assets,
+    liquidityMaps,
     pages: options.pages,
   };
 }
