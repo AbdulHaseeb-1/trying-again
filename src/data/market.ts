@@ -37,13 +37,6 @@ export type NewsItem = {
   tone: Tone;
 };
 
-export const derivativeMetrics = [
-  { label: 'Open Interest', value: '$34.2B', change: '+4.8%', tone: 'positive' as Tone },
-  { label: 'Funding', value: '0.010%', change: 'Balanced', tone: 'positive' as Tone },
-  { label: 'Long / Short', value: '52% / 48%', change: 'Longs higher', tone: 'neutral' as Tone },
-  { label: 'Liquidations', value: '$48.7M', change: '24H', tone: 'warning' as Tone },
-];
-
 export const alertSeed = [
   { id: 'a1', icon: 'chart', title: 'BTC OI Spike', detail: 'Open interest increased 12% within 1 hour.', time: '8m ago', active: true },
   { id: 'a2', icon: 'percent', title: 'Funding Extreme', detail: 'BTC funding exceeded the historical threshold.', time: '46m ago', active: true },

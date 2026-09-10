@@ -1,7 +1,19 @@
-# MarketPulse Calendar Service
+# MarketPulse Market Data Service
 
-NestJS service that keeps a rolling window of the [ForexFactory][ff] economic
-calendar warm and serves it to the MarketPulse app.
+NestJS service that scrapes the market data the app runs on and keeps it warm:
+the [ForexFactory][ff] economic calendar, and [CoinGlass][cg] derivatives.
+
+Both pipelines share the same shape — sources behind a timeout and a circuit
+breaker, an in-memory store that only ever advances, a last-known-good snapshot
+on disk, and an SSE stream so clients hear about a change instead of polling for
+it.
+
+- [The calendar](#the-calendar) — 2 days back, 7 days ahead, burst-polled around
+  every release.
+- [Derivatives](#derivatives) — open interest, funding, liquidations and
+  positioning per coin and per venue, refreshed every minute.
+
+# The calendar
 
 ## What it does
 
@@ -113,17 +125,6 @@ the full list with defaults. The ones worth knowing:
 | `SCRAPER_HEADLESS` | `false` | Headless will not clear Cloudflare |
 | `SCRAPER_CHROMIUM_PATH` | — | Override the Chromium binary |
 
-## Tests
-
-```bash
-npm test
-```
-
-Covers identity and merge rules (including the "never un-release a print"
-invariant and window-scoped pruning), the window/filter logic, and the release
-watcher's arm → poll → resolve and arm → poll → expire paths against a stubbed
-source.
-
 ## Tooling
 
 `scripts/import-snapshot.ts` converts a raw `calendarComponentStates` capture
@@ -135,5 +136,107 @@ one that cannot:
 npx tsx scripts/import-snapshot.ts capture.json data/calendar-snapshot.json
 ```
 
+# Derivatives
+
+Everything CoinGlass publishes about a coin's futures market, refreshed every
+minute: open interest and its change over eight windows, funding weighted three
+ways, liquidations by window / venue / coin plus the live order feed, taker and
+account-level positioning, options open interest, the full venue table, and a
+market-wide screener of ~1,000 coins.
+
+## Endpoints
+
+| Method | Path                        | Purpose |
+| ------ | --------------------------- | ------- |
+| `GET`  | `/api/derivatives`          | One asset's full breakdown plus market context (`?symbol=BTC`) |
+| `GET`  | `/api/derivatives/assets`   | Every tracked asset, fully expanded |
+| `GET`  | `/api/derivatives/market`   | Market totals, screener, liquidations, macro cards |
+| `GET`  | `/api/derivatives/status`   | Which pages answered, sync history, cadence |
+| `POST` | `/api/derivatives/refresh`  | Scrape now, bypassing the interval |
+| `POST` | `/api/derivatives/config`   | Retune `refreshIntervalMs` live |
+| `GET`  | `/api/derivatives/stream`   | SSE stream of `sync` events |
+
+## How the data gets in
+
+CoinGlass encrypts every API response — the body is `{"code":"0","data":"<base64>"}`
+— and decodes it in the browser. The HTML is no better: the tables are drawn
+from that decoded state, so a DOM scrape would lose precision, units, and every
+value that only ever appears inside a chart.
+
+So the scraper lets the page do its own work and reads the result. A script
+injected before any page script wraps `JSON.parse` — the one funnel every
+decoded payload passes through — and keeps what comes out. That yields
+CoinGlass' own model, in the shape its front end consumes.
+
+Three details make it work and are easy to lose:
+
+- **The hook is injected as source text, not as a function.** Playwright
+  stringifies a function argument, which sends whatever the transpiler emitted
+  along with it — and esbuild's `keepNames` helper (`__name`) does not exist in
+  the browser. The ReferenceError fires *before* `JSON.parse` is replaced, so
+  the page runs happily and the harvest comes back empty with nothing in the
+  logs to explain it.
+- **Payloads are identified by shape, not by endpoint** (`coinglass.classify.ts`).
+  The hook never sees the request URL, but shape turns out to be the more
+  durable key anyway: CoinGlass re-versions endpoints far more often than it
+  renames fields, and an unrecognised payload is skipped rather than mis-parsed.
+- **Post-quantum TLS must be disabled** behind a TLS-terminating proxy, exactly
+  as for the calendar scraper.
+
+A run visits the home page (market totals, screener, funding extremes, macro
+cards), the liquidation page (windows, venues, coins, the largest order and the
+live feed) and one page per tracked coin (venue table, funding history, price
+history, spot flow). Pages are independent, and each one's outcome is reported
+in `/api/derivatives/status`, so a partial run is visible rather than silently
+thin. The store merges per asset, so a page that fails leaves the previous
+numbers standing instead of blanking a screen that was correct a minute ago.
+
+### Where CoinGlass contradicts itself
+
+The per-coin liquidation payload reports `longNumber`/`shortNumber` the wrong
+way round against its own `longVolUsd`/`shortVolUsd` — and against the count
+fields CoinGlass publishes for the same coin in the screener. The mapper drops
+that pair and takes the counts from the screener; the venue payload, which is
+self-consistent, keeps its own.
+
+## Scraping by hand
+
+`scripts/scrape-coinglass.ts` runs one scrape outside the server — useful for
+re-seeding, for checking a mapper change against the live site without booting
+Nest, and for capturing on a machine that can reach CoinGlass to carry to one
+that cannot:
+
+```bash
+npx tsx scripts/scrape-coinglass.ts seed/derivatives-snapshot.json BTC,ETH,SOL
+```
+
+## Configuration
+
+| Variable | Default | Meaning |
+| -------- | ------- | ------- |
+| `DERIVATIVES_ASSETS` | `BTC,ETH,SOL` | Coins to keep a full breakdown for |
+| `DERIVATIVES_REFRESH_INTERVAL_MS` | `60000` | Base refresh loop |
+| `COINGLASS_HEADLESS` | `true` | CoinGlass has no interstitial to clear |
+| `COINGLASS_SETTLE_MS` | `12000` | How long to let a page keep answering |
+| `COINGLASS_SETTLE_QUIET_MS` | `2500` | Quiet gap that ends a page early |
+| `COINGLASS_MAX_ORDERS` / `_SCREENER_ROWS` / `_SERIES_POINTS` | `60` / `100` / `240` | Caps on the firehose endpoints |
+
+# Tests
+
+```bash
+npm test
+```
+
+For the calendar: identity and merge rules (including the "never un-release a
+print" invariant and window-scoped pruning), the window/filter logic, and the
+release watcher's arm → poll → resolve and arm → poll → expire paths against a
+stubbed source.
+
+For derivatives: shape classification (including the payloads that must *not*
+be recognised), the mapper's coercion and the contradictions it works around,
+and the store's guarantee that a partial run never blanks an asset an earlier
+run captured.
+
 [ff]: https://www.forexfactory.com/calendar
+[cg]: https://www.coinglass.com
 [ck]: https://github.com/connor4312/cockatiel

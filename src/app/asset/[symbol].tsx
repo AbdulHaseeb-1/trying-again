@@ -8,7 +8,7 @@ import { FilterChips, LineChart, MetricTile, Sparkline, toneColor } from '@/comp
 import { Tap } from '@/components/tap';
 import { TabSwipe } from '@/components/tab-swipe';
 import { ThemedText } from '@/components/themed-text';
-import { derivativeMetrics, detailSeries, marketAssets } from '@/data/market';
+import { detailSeries, marketAssets } from '@/data/market';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 

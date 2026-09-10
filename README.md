@@ -35,24 +35,32 @@ npm run reset-project
 
 This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
-## Economic calendar
+## Live market data
 
-The **Calendar** tab is backed by a NestJS service in [`server/`](server) that
-scrapes the ForexFactory economic calendar with Playwright, keeps a rolling
-2-days-back / 7-days-ahead window warm, and polls every 10 seconds around each
-scheduled release until the actual number prints. See
-[`server/README.md`](server/README.md) for the architecture and configuration.
+The **Calendar** and **Derivatives** tabs are backed by a NestJS service in
+[`server/`](server) that scrapes both feeds with Playwright and keeps them warm.
+See [`server/README.md`](server/README.md) for the architecture and configuration.
+
+- **Economic calendar** — the ForexFactory calendar over a rolling
+  2-days-back / 7-days-ahead window, burst-polled every 10 seconds around each
+  scheduled release until the actual number prints.
+- **Derivatives** — CoinGlass open interest, funding, liquidations and
+  positioning, per coin and per venue, refreshed every minute. CoinGlass
+  encrypts its API payloads and decodes them in the browser, so the scraper
+  loads the page and harvests what the page itself decoded rather than parsing
+  the DOM.
 
 Run it alongside the app:
 
 ```bash
 cd server
 npm install && npm run build
-# Chromium has to run headed to clear Cloudflare:
+# Chromium has to run headed to clear ForexFactory's Cloudflare check:
 xvfb-run -a node dist/main.js          # or just `node dist/main.js` with a display
 ```
 
-Point the app at it with `EXPO_PUBLIC_CALENDAR_API_URL` (defaults to
+Both tabs read the same service, so point the app at it with
+`EXPO_PUBLIC_CALENDAR_API_URL` (defaults to
 `http://localhost:4000`; a physical device needs the machine's LAN address):
 
 ```bash

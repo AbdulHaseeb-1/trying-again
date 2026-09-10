@@ -13,9 +13,51 @@ import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
 import { Radius, Spacing } from '@/constants/theme';
 import { impactRank, type CalendarEvent } from '@/data/calendar';
-import { derivativeMetrics, marketAssets } from '@/data/market';
+import type { AssetSummary } from '@/data/derivatives';
+import {
+  changeTone,
+  formatPercent,
+  formatUsd,
+  fundingTone,
+  fundingVerdict,
+  formatRate,
+  ratioToLongPercent,
+} from '@/data/derivatives';
+import { marketAssets } from '@/data/market';
 import { useCalendar, useNow } from '@/hooks/use-calendar';
+import { useDerivatives } from '@/hooks/use-derivatives';
 import { useAppTheme, useTheme } from '@/hooks/use-theme';
+
+/** The four numbers worth carrying on a screen that is mostly about the calendar. */
+function derivativeTiles(summary: AssetSummary) {
+  const longPercent = ratioToLongPercent(summary.longShortRatio.h24);
+  return [
+    {
+      label: 'Open interest',
+      value: formatUsd(summary.openInterestUsd),
+      note: formatPercent(summary.openInterestChange.h24),
+      tone: changeTone(summary.openInterestChange.h24),
+    },
+    {
+      label: 'Funding',
+      value: formatRate(summary.fundingRateByOpenInterest),
+      note: fundingVerdict(summary.fundingRateByOpenInterest),
+      tone: fundingTone(summary.fundingRateByOpenInterest),
+    },
+    {
+      label: 'Long / short',
+      value: longPercent === null ? '—' : `${Math.round(longPercent)}% / ${Math.round(100 - longPercent)}%`,
+      note: longPercent === null ? '—' : longPercent >= 50 ? 'Longs ahead' : 'Shorts ahead',
+      tone: 'neutral' as const,
+    },
+    {
+      label: 'Liquidations',
+      value: formatUsd(summary.liquidationUsd24h),
+      note: '24H',
+      tone: 'warning' as const,
+    },
+  ];
+}
 
 export default function PulseScreen() {
   const router = useRouter();
@@ -30,6 +72,8 @@ export default function PulseScreen() {
 
   const now = useNow();
   const { data, refreshing, refresh } = useCalendar();
+  // No symbol: the service leads with whatever it tracks first, usually BTC.
+  const { data: derivatives } = useDerivatives(null);
 
   // The Pulse tab cares about what can actually move a market, so it leads on
   // the next high-impact print and previews the rest.
@@ -117,12 +161,20 @@ export default function PulseScreen() {
           <AppIcon name="chevron" color={theme.textMuted} />
         </View>
 
-        <View style={styles.sectionGap}>
-          <SectionHeader title="Derivatives snapshot" action="Details" onAction={() => router.push('/derivatives')} />
-          <View style={[styles.metrics, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            {derivativeMetrics.map((metric) => <MetricTile key={metric.label} label={metric.label} value={metric.value} note={metric.change} tone={metric.tone} />)}
+        {derivatives?.asset ? (
+          <View style={styles.sectionGap}>
+            <SectionHeader
+              title={`${derivatives.asset.summary.symbol} derivatives`}
+              action="Details"
+              onAction={() => router.push('/derivatives')}
+            />
+            <View style={[styles.metrics, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              {derivativeTiles(derivatives.asset.summary).map((tile) => (
+                <MetricTile key={tile.label} label={tile.label} value={tile.value} note={tile.note} tone={tile.tone} />
+              ))}
+            </View>
           </View>
-        </View>
+        ) : null}
       </ScrollView>
 
       <BottomSheet visible={quickSheet} title="Quick search" onClose={() => setQuickSheet(false)}>
