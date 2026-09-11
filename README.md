@@ -78,6 +78,38 @@ Both tabs read the same service, so point the app at it with
 EXPO_PUBLIC_CALENDAR_API_URL=http://192.168.1.20:4000 npx expo start
 ```
 
+## The assistant
+
+MarketPulse ships an AI workspace rather than a chat box: a resizable panel on a
+desktop, a sheet on a phone, and one runtime behind both.
+
+- **Real agents.** Four of them — a main Market Assistant, a Market Analyst, a
+  News Research agent and a Research agent — built on the official
+  [`@openai/agents`](https://openai.github.io/openai-agents-js/) SDK, with
+  delegation and hand-off where isolating context genuinely helps.
+- **Application tools.** The agents read the same market data, charts, calendar
+  and news the tabs read, through typed tools with schemas, permissions,
+  timeouts and normalized errors. Read-only by default; nothing gets raw
+  database access.
+- **Citations that mean something.** Every `[1]` in an answer maps to a stored
+  reference a tool actually returned — an article, a page, a market reading —
+  and opens a preview of that source. Markers the model invents are removed
+  before they are ever drawn.
+- **Any provider.** OpenAI, OpenRouter, Anthropic, Google and any
+  OpenAI-compatible endpoint, configured in the app. Models are chosen per role
+  and per agent, with a recorded fallback when one is unavailable.
+- **Search, if you want it.** Tavily, Exa, Brave, SearXNG, a plain REST endpoint
+  or OpenAI's hosted tool, behind one `web_search` tool and one set of policies.
+
+Configure it in **Settings → AI & Agents**. Keys are sealed at rest on the
+server and are never sent back to the app. See
+[`server/README.md`](server/README.md#ai--agents) for the runtime, the storage
+and the security model, and [`server/.env.example`](server/.env.example) for the
+environment.
+
+Nothing above is required to run the app: with no provider configured the
+assistant says so and every other feature works as before.
+
 ### Other setup steps
 
 - To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
