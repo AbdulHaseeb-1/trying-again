@@ -28,7 +28,24 @@ type IconName =
   | 'clock'
   | 'globe'
   | 'zap'
-  | 'info';
+  | 'info'
+  | 'stop'
+  | 'attach'
+  | 'more'
+  | 'pin'
+  | 'trash'
+  | 'edit'
+  | 'history'
+  | 'collapse'
+  | 'expand'
+  | 'link'
+  | 'check'
+  | 'warning'
+  | 'refresh'
+  | 'chevronDown'
+  | 'tool'
+  | 'brain'
+  | 'handoff';
 
 const symbols: Record<IconName, unknown> = {
   pulse: { ios: 'waveform.path.ecg', android: 'monitor_heart', web: 'monitor_heart' },
@@ -58,6 +75,23 @@ const symbols: Record<IconName, unknown> = {
   globe: { ios: 'globe', android: 'public', web: 'public' },
   zap: { ios: 'bolt.fill', android: 'bolt', web: 'bolt' },
   info: { ios: 'info.circle', android: 'info', web: 'info' },
+  stop: { ios: 'stop.fill', android: 'stop_circle', web: 'stop_circle' },
+  attach: { ios: 'paperclip', android: 'attach_file', web: 'attach_file' },
+  more: { ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' },
+  pin: { ios: 'pin', android: 'push_pin', web: 'push_pin' },
+  trash: { ios: 'trash', android: 'delete', web: 'delete' },
+  edit: { ios: 'pencil', android: 'edit', web: 'edit' },
+  history: { ios: 'clock.arrow.circlepath', android: 'history', web: 'history' },
+  collapse: { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' },
+  expand: { ios: 'chevron.down', android: 'expand_more', web: 'expand_more' },
+  link: { ios: 'link', android: 'link', web: 'link' },
+  check: { ios: 'checkmark', android: 'check', web: 'check' },
+  warning: { ios: 'exclamationmark.triangle', android: 'warning', web: 'warning' },
+  refresh: { ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' },
+  chevronDown: { ios: 'chevron.down', android: 'expand_more', web: 'expand_more' },
+  tool: { ios: 'wrench.and.screwdriver', android: 'build', web: 'build' },
+  brain: { ios: 'brain', android: 'psychology', web: 'psychology' },
+  handoff: { ios: 'arrow.triangle.branch', android: 'alt_route', web: 'alt_route' },
 };
 
 export function AppIcon({ name, size = 18, color }: { name: IconName; size?: number; color: string }) {

@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
+import { useReportContext } from '@/agent/state/use-report-context';
+
 import { AppIcon } from '@/components/app-icon';
 import { AssetIcon } from '@/components/asset-icon';
 import { Card, DataRow, Note, StatGrid } from '@/components/derivatives/primitives';
@@ -55,6 +57,14 @@ export default function AssetDetailScreen() {
   const { data, error, loading, refreshing, refresh } = useDerivatives(wanted || null);
 
   const asset = data?.asset?.summary.symbol === wanted ? data.asset : null;
+
+  // The detail screen is the most specific thing the user can be looking at,
+  // so it is the one the assistant should follow.
+  useReportContext({
+    symbol: wanted || null,
+    chartId: wanted ? `asset:${wanted}` : null,
+    workspace: 'Asset detail',
+  });
   const screenerRow = useMemo(
     () => data?.market?.screener.find((row) => row.symbol === wanted) ?? null,
     [data, wanted],

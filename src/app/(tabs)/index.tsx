@@ -24,6 +24,7 @@ import {
   formatRate,
   ratioToLongPercent,
 } from '@/data/derivatives';
+import { useAgentPanel } from '@/agent';
 import { useCalendar, useNow } from '@/hooks/use-calendar';
 import { useDerivatives } from '@/hooks/use-derivatives';
 import { useAppTheme, useTheme } from '@/hooks/use-theme';
@@ -70,6 +71,7 @@ export default function PulseScreen() {
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [clockSheetOpen, setClockSheetOpen] = useState(false);
 
+  const { openAgent } = useAgentPanel();
   const now = useNow();
   const { data, refreshing, refresh, live } = useCalendar();
   // No symbol: the service leads with whatever it tracks first, usually BTC.
@@ -150,14 +152,31 @@ export default function PulseScreen() {
           </View>
         ) : null}
 
-        <View style={[styles.aiCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        {/* An entry point, not a canned opinion. The readout that used to sit
+            here was hardcoded prose that never changed with the market; the
+            assistant behind this row reads the same data the screen does. */}
+        <Tap
+          accessibilityRole="button"
+          accessibilityLabel="Ask the market assistant"
+          onPress={() =>
+            openAgent({
+              prompt: nextHighImpact
+                ? `What should I watch into ${nextHighImpact.currency} ${nextHighImpact.title}?`
+                : 'What is driving the market right now?',
+            })
+          }
+          style={[styles.aiCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={styles.aiIcon}><AppIcon name="sparkles" color={theme.primary} /></View>
           <View style={styles.aiCopy}>
-            <ThemedText style={styles.aiTitle}>AI readout</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">Markets are positioning for a hotter CPI print. Elevated BTC open interest suggests higher volatility into the release.</ThemedText>
+            <ThemedText style={styles.aiTitle}>Ask the assistant</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              {nextHighImpact
+                ? `What to watch into ${nextHighImpact.currency} ${nextHighImpact.title}`
+                : 'What is driving the market right now'}
+            </ThemedText>
           </View>
           <AppIcon name="chevron" color={theme.textMuted} />
-        </View>
+        </Tap>
 
         {derivatives?.asset ? (
           <View style={styles.sectionGap}>
@@ -204,6 +223,23 @@ export default function PulseScreen() {
       </BottomSheet>
 
       <BottomSheet visible={settingsOpen} title="Settings" onClose={() => setSettingsOpen(false)}>
+        <Tap
+          accessibilityRole="button"
+          accessibilityLabel="AI and Agents settings"
+          onPress={() => {
+            setSettingsOpen(false);
+            router.push('/settings/ai');
+          }}
+          style={[styles.settingLink, { borderColor: theme.border }]}>
+          <AppIcon name="sparkles" size={17} color={theme.primary} />
+          <View style={styles.settingLinkCopy}>
+            <ThemedText type="smallBold">AI &amp; Agents</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Providers, models, agents, search and permissions
+            </ThemedText>
+          </View>
+          <AppIcon name="chevron" size={14} color={theme.textMuted} />
+        </Tap>
         <View style={styles.settingGroup}>
           <ThemedText type="smallBold">Font size</ThemedText>
           <ThemedText type="small" themeColor="textSecondary">Choose the reading size that feels best.</ThemedText>
@@ -256,6 +292,17 @@ const styles = StyleSheet.create({
   sheetRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: Spacing.three, borderBottomWidth: StyleSheet.hairlineWidth },
   sheetName: { flex: 1 },
   sheetSymbol: { width: 40, fontWeight: '700' },
+  settingLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    minHeight: 52,
+    paddingHorizontal: Spacing.four,
+    marginBottom: Spacing.four,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.md,
+  },
+  settingLinkCopy: { flex: 1, gap: 1 },
   settingGroup: { gap: Spacing.two },
   fontOptions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },
   fontOption: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.md },

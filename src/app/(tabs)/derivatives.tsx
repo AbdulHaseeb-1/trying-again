@@ -21,6 +21,7 @@ import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { formatPercent, formatPrice, formatUsd } from '@/data/derivatives';
+import { useReportContext } from '@/agent/state/use-report-context';
 import { useNow } from '@/hooks/use-calendar';
 import { useDerivatives } from '@/hooks/use-derivatives';
 import { useLiquidityMap } from '@/hooks/use-liquidity-map';
@@ -69,6 +70,13 @@ export default function DerivativesScreen() {
     view === 'Liquidity Map',
     data?.refreshIntervalMs ?? 60_000,
   );
+
+  // What the assistant reads when it is asked about "this chart".
+  useReportContext({
+    symbol: activeSymbol,
+    chartId: activeSymbol ? `derivatives:${activeSymbol}` : null,
+    workspace: `Derivatives · ${view}`,
+  });
 
   const select = useCallback((next: string) => {
     setSymbol(next);
