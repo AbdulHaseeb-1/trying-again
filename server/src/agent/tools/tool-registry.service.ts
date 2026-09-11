@@ -101,15 +101,17 @@ export class AgentToolRegistry {
     granted: readonly Capability[],
     sink: RunSink,
   ): Tool<unknown> {
+    // Decided once here for the SDK's own gate, and again inside `execute`:
+    // the grant can be edited between building the agent and the model calling
+    // the tool, and the second check is the one that actually protects data.
+    const upfront = decide(definition.capability, definition.level, granted);
+
     return tool({
       name: definition.name,
       description: definition.description,
       parameters: definition.parameters,
       strict: true,
-      needsApproval: decide(definition.capability, definition.level, granted).allowed
-        ? (decide(definition.capability, definition.level, granted) as { needsApproval: boolean })
-            .needsApproval
-        : false,
+      needsApproval: upfront.allowed ? upfront.needsApproval : false,
       execute: async (input: unknown, runContext) => {
         void runContext;
         const decision = decide(definition.capability, definition.level, granted);
