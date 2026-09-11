@@ -9,6 +9,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAgentPanel } from '@/agent';
 import { AppIcon } from '@/components/app-icon';
 import { CurrencyBadge, currencyColor } from '@/components/calendar/currency-badge';
 import { ImpactMark, impactColor, impactLabel } from '@/components/calendar/impact-mark';
@@ -68,6 +69,8 @@ export default function EventDetailScreen() {
     opacity: interpolate(scrollY.value, [46, 78], [0, 1], 'clamp'),
   }));
 
+  const { analyzeRelease } = useAgentPanel();
+
   const goBack = () => {
     if (router.canGoBack()) router.back();
     else router.replace('/calendar');
@@ -122,6 +125,19 @@ export default function EventDetailScreen() {
                   {event?.title ?? ''}
                 </ThemedText>
               </Animated.View>
+
+              {/* The assistant already has a tool for this release; the
+                  affordance is just a way to hand it the one on screen. */}
+              <Tap
+                accessibilityRole="button"
+                accessibilityLabel="Ask the assistant about this release"
+                onPress={() =>
+                  event && analyzeRelease({ id: event.id, title: event.title, currency: event.currency })
+                }
+                haptic="none"
+                style={styles.askButton}>
+                <AppIcon name="sparkles" size={17} color={theme.primary} />
+              </Tap>
 
               <Animated.View
                 style={[styles.barHairline, { backgroundColor: theme.separator }, barBorder]}
@@ -395,6 +411,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 106,
   },
   compactTitleText: { fontSize: 15, lineHeight: 20, fontWeight: '600', letterSpacing: -0.2 },
+  askButton: {
+    position: 'absolute',
+    right: Spacing.four,
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: Radius.full,
+  },
   barHairline: {
     position: 'absolute',
     left: 0,

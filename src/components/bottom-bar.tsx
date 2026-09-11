@@ -1,7 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useAgentPanel } from '@/components/agent-panel';
+import { useAgentPanel } from '@/agent';
 import { AppIcon, type IconName } from '@/components/app-icon';
 import { Tap } from '@/components/tap';
 import { ThemedText } from '@/components/themed-text';
@@ -71,7 +71,7 @@ export function BottomBar({ state, descriptors, navigation }: BottomBarProps) {
       <Tap
         accessibilityRole="button"
         accessibilityLabel="Open MarketPulse AI"
-        onPress={openAgent}
+        onPress={() => openAgent()}
         haptic="success"
         style={[styles.agentButton, { backgroundColor: theme.primary, bottom: bottom + 64 }]}>
         <AppIcon name="sparkles" size={21} color={theme.background} />

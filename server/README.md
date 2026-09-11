@@ -341,6 +341,119 @@ series, filtered by symbol, venue and range.
 | `price_point` | Price series | `(symbol, at)` |
 | `liquidation_order` | The live liquidation feed | the order's own fingerprint |
 
+# AI & Agents
+
+The assistant is a subsystem, not an endpoint: a runtime built on the official
+[`@openai/agents`][oa] SDK, a provider layer, a tool layer, a citation layer and
+a news pipeline. Everything a model can reach goes through one of them.
+
+## The layers
+
+| Layer | What it owns |
+| --- | --- |
+| `AgentRuntime` | One run: build, stream, fail over, settle, persist. The only place a run is driven. |
+| `AgentRegistry` / `AgentFactory` | The agent definitions, and the only place `new Agent()` is called. |
+| `AgentToolRegistry` | Tool construction, permission checks, deadlines, cancellation, error normalization, reference registration. |
+| `ProviderRegistry` | Every `LLMProvider`, its capability matrix and its model list. |
+| `SearchProviderRegistry` | Every `SearchProvider`, plus the policy applied to all of them. |
+| `ConversationRepository` | Conversations, messages, references, session items and runs — Postgres, or a durable file when no database is configured. |
+| `RunCitations` | Which references a run actually produced, and which markers survive. |
+| `AiSettingsService` / `SecretStore` | Configuration, and the sealed store secrets live in. |
+
+Adding a provider, a search engine, a tool or a specialist means adding a file
+and registering it. There is no switch statement to extend.
+
+## The agents
+
+- **Market Assistant** — the default. Answers directly, delegates when isolating
+  context helps, hands off to Research for long-running work.
+- **Market Analyst** — market data, derivatives and charts. No web access.
+- **News Research** — the application's own news corpus first, then the web.
+- **Research** — the wide-search agent, used through a hand-off.
+
+## The tools
+
+Market: `get_market_snapshot`, `get_ohlcv`, `get_open_interest`, `get_funding`,
+`get_liquidations`, `get_volume_profile`, `get_market_movers`,
+`get_economic_calendar`, `get_next_release`, `get_session_information`.
+Chart: `get_current_chart`, `get_visible_chart_range`, `get_selected_symbol`,
+`get_selected_timeframe`.
+News: `get_latest_news`, `search_news`, `get_news_item`, `get_news_for_symbol`,
+`get_news_between`, `get_related_news`.
+Application: `get_current_workspace`, `get_user_selected_context`,
+`get_current_session`.
+Web: `web_search`, `web_fetch`.
+
+Each declares a Zod schema, a capability, a permission level and a timeout. A
+tool failure is returned to the model as a result, not thrown — the model can
+say what it could not read instead of the run dying.
+
+## News as data
+
+Calendar releases become canonical `NewsItem`s with deterministic ids
+(`news_…`), and configured RSS feeds are normalized into the same shape. The
+agents search that corpus by query, symbol, time range or id, and a citation
+resolves back to the stored article — headline, publisher, publication time,
+summary, affected symbols, importance and the original link.
+
+## Security
+
+- Provider keys are sealed with AES-256-GCM before they touch disk and are never
+  returned to a client. The app sees a masked preview and nothing else.
+- Every agent and settings route requires a bearer token issued to a registered
+  device; conversations, messages and runs are scoped to that principal in the
+  query, not in the response mapper.
+- Tool arguments are validated server-side against their schema. Authorization
+  is a capability check in code — the model is never asked whether it may do
+  something.
+- `web_fetch` resolves DNS and refuses anything that is not a public unicast
+  address, re-checking on every redirect hop, with a byte cap and a deadline.
+- Fetched pages and news articles are wrapped as untrusted data in the prompt,
+  with instructions to treat their contents as claims rather than commands.
+- Telemetry records what a run *did* — latency, tokens, tools, failures — and
+  never what was said.
+
+## Endpoints
+
+```
+POST   /api/agent/auth/device            register a client, receive a token
+GET    /api/agent/bootstrap              agents, tools, privacy, readiness
+GET    /api/agent/conversations          list · POST to create
+GET    /api/agent/conversations/:id      read · PATCH to rename/pin · DELETE
+GET    /api/agent/conversations/:id/messages
+POST   /api/agent/conversations/:id/messages   send; streams NDJSON events
+POST   /api/agent/runs/stop              cancel a run
+GET    /api/agent/runs                   run inspector (debug mode only)
+GET    /api/settings/ai                  the whole configuration
+PATCH  /api/settings/ai/providers/:id    · POST /:id/test to check one
+PATCH  /api/settings/ai/models/:role     primary · research · fallback
+PATCH  /api/settings/ai/agents/:id       per-agent model and capabilities
+PATCH  /api/settings/ai/search           policy · providers under /search/providers
+GET    /api/news/search                  · /:id · /symbol/:symbol · /:id/related
+POST   /api/news/refresh                 re-sync the corpus
+```
+
+Streaming is newline-delimited JSON over a plain `POST`, not SSE: the client is
+a React Native app as well as a browser, and `EventSource` exists only on the
+web and cannot carry a request body.
+
+## Storage
+
+Ten tables, all optional: `agent_conversation`, `agent_message`,
+`agent_reference`, `agent_message_reference`, `agent_session_item`, `agent_run`,
+`agent_secret`, `agent_device`, `app_setting`, `news_item`. Without
+`DATABASE_URL` the same data is written to durable JSON files under `data/`, so
+the assistant is fully functional on a laptop and durable in production.
+
+## Configuration
+
+See [`.env.example`](.env.example) — `AGENT_SECRET_KEY` (set it explicitly for
+anything multi-instance), `AGENT_REGISTRATION_SECRET`, `AGENT_TRACING`,
+`NEWS_RSS_FEEDS` and the optional provider seeds. Everything else is configured
+from the app in **Settings → AI & Agents**.
+
+[oa]: https://openai.github.io/openai-agents-js/
+
 # Tests
 
 ```bash
@@ -364,6 +477,22 @@ For the archive: what each pipeline decides to write and when — against a fake
 client for the decisions, and against a real Postgres (opt-in, via
 `TEST_DATABASE_URL`) for the promise only a database can keep, that re-offering
 stored rows collapses into the rows already there.
+
+For the assistant: the permission decision, citation sanitisation, error
+normalization and tool wrapping as units; a contract suite every `LLMProvider`
+must pass and another every `SearchProvider` must pass; and integration suites
+that boot the real application — guard, validation pipe, streaming controller,
+SDK runner, tool layer, citation layer, repository — against a local stand-in
+for the model's wire. The Postgres suite (same `TEST_DATABASE_URL`) proves the
+database path specifically: citations survive a round trip, history replays from
+stored session items, and reads are scoped by principal in SQL.
+
+The browser end is Playwright, against the exported web build and the compiled
+service:
+
+```bash
+npm --prefix .. run test:e2e
+```
 
 [ff]: https://www.forexfactory.com/calendar
 [cg]: https://www.coinglass.com

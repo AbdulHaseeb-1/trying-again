@@ -207,3 +207,211 @@ model LiquidationOrder {
   @@index([exchange, at])
   @@map("liquidation_order")
 }
+
+// ---------------------------------------------------------------------------
+// The agent workspace.
+//
+// Three separate concerns share this section, and keeping them separate is the
+// point:
+//
+//  1. `agent_conversation` / `agent_message` / `agent_reference` are what the
+//     UI renders — a turn, its citations, the tool activity behind it.
+//  2. `agent_session_item` is what the model replays. The Agents SDK session
+//     protocol is a flat list of input items (messages, function calls, their
+//     outputs) and does not map onto "a message" one-for-one, so it gets its
+//     own append-only table rather than being squeezed into the UI shape.
+//  3. `agent_run` is telemetry: one row per run, written once it settles.
+//
+// Secrets live in `agent_secret`, encrypted; nothing else in the schema stores
+// credential material.
+
+/// A stored agent conversation.
+model AgentConversation {
+  id         String   @id
+  /// The principal that owns it. Every read is scoped by this.
+  userId     String   @map("user_id")
+  title      String
+  agentId    String   @map("agent_id")
+  pinned     Boolean  @default(false)
+  /// The chart/workspace the conversation was opened from.
+  symbol     String?
+  timeframe  String?
+  workspace  String?
+  providerId String?  @map("provider_id")
+  modelId    String?  @map("model_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  messages     AgentMessage[]
+  sessionItems AgentSessionItem[]
+  runs         AgentRun[]
+
+  @@index([userId, updatedAt])
+  @@index([userId, pinned, updatedAt])
+  @@map("agent_conversation")
+}
+
+/// One rendered turn.
+model AgentMessage {
+  id             String   @id
+  conversationId String   @map("conversation_id")
+  role           String
+  text           String
+  agentId        String?  @map("agent_id")
+  providerId     String?  @map("provider_id")
+  modelId        String?  @map("model_id")
+  /// Context chips attached to a user turn.
+  attachments    Json?
+  /// Tool activity behind an assistant turn, already summarised for display.
+  toolRuns       Json?    @map("tool_runs")
+  /// A normalized error, when the turn failed.
+  error          Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AgentConversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  references   AgentMessageReference[]
+
+  @@index([conversationId, createdAt])
+  @@map("agent_message")
+}
+
+/// A citable source, of any kind, stored once and referenced many times.
+model AgentReference {
+  /// Derived from type + identity, so the same article cited twice is one row.
+  id          String    @id
+  type        String
+  title       String
+  url         String?
+  source      String?
+  publishedAt DateTime? @map("published_at")
+  /// The internal id when this points at something we store, e.g. a news item.
+  entityId    String?   @map("entity_id")
+  snippet     String?
+  metadata    Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  messages AgentMessageReference[]
+
+  @@index([type, entityId])
+  @@map("agent_reference")
+}
+
+/// The join that makes "[2]" in an answer resolve to a real source.
+model AgentMessageReference {
+  messageId     String @map("message_id")
+  referenceId   String @map("reference_id")
+  citationIndex Int    @map("citation_index")
+
+  message   AgentMessage   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reference AgentReference @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, referenceId])
+  @@index([messageId, citationIndex])
+  @@map("agent_message_reference")
+}
+
+/// The Agents SDK session history, append-only and replayed in id order.
+model AgentSessionItem {
+  id             Int      @id @default(autoincrement())
+  conversationId String   @map("conversation_id")
+  payload        Json
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, id])
+  @@map("agent_session_item")
+}
+
+/// One run, for the run inspector and for provider/latency reporting.
+model AgentRun {
+  id             String    @id
+  conversationId String    @map("conversation_id")
+  userId         String    @map("user_id")
+  agentId        String    @map("agent_id")
+  status         String
+  startedAt      DateTime  @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+  durationMs     Int?      @map("duration_ms")
+  /// Time to the first streamed token — the number users actually feel.
+  firstTokenMs   Int?      @map("first_token_ms")
+  providerId     String?   @map("provider_id")
+  modelId        String?   @map("model_id")
+  /// Set when the run started on one model and finished on another.
+  fallbackFrom   String?   @map("fallback_from")
+  inputTokens    Int       @default(0) @map("input_tokens")
+  outputTokens   Int       @default(0) @map("output_tokens")
+  requests       Int       @default(0)
+  toolCalls      Int       @default(0) @map("tool_calls")
+  toolFailures   Int       @default(0) @map("tool_failures")
+  handoffs       Int       @default(0)
+  searchProvider String?   @map("search_provider")
+  referenceCount Int       @default(0) @map("reference_count")
+  errorCode      String?   @map("error_code")
+
+  conversation AgentConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+  @@index([conversationId, startedAt])
+  @@map("agent_run")
+}
+
+/// Provider and search credentials, encrypted with AES-256-GCM at rest.
+model AgentSecret {
+  key        String   @id
+  ciphertext String
+  iv         String
+  tag        String
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("agent_secret")
+}
+
+/// Non-secret application settings, as one JSON document per key.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_setting")
+}
+
+/// A registered client, and the identity every agent request is scoped by.
+model AgentDevice {
+  id        String   @id
+  userId    String   @map("user_id")
+  label     String?
+  platform  String?
+  createdAt DateTime @default(now()) @map("created_at")
+  lastSeen  DateTime @updatedAt @map("last_seen")
+
+  @@index([userId])
+  @@map("agent_device")
+}
+
+/// A canonical news item: one row per story, whatever provider it arrived from.
+model NewsItem {
+  /// Stable and internal (`news_…`), so an agent can cite it by id forever.
+  id             String   @id
+  title          String
+  summary        String?
+  /// Extracted article text when we have it. Untrusted input, never a prompt.
+  body           String?
+  source         String
+  sourceUrl      String?  @map("source_url")
+  canonicalUrl   String?  @map("canonical_url")
+  publishedAt    DateTime @map("published_at")
+  receivedAt     DateTime @default(now()) @map("received_at")
+  symbols        String[]
+  categories     String[]
+  importance     String
+  sentiment      String?
+  provider       String
+  providerItemId String?  @map("provider_item_id")
+  metadata       Json?
+
+  @@unique([provider, providerItemId])
+  @@index([publishedAt])
+  @@index([provider, publishedAt])
+  @@map("news_item")
+}
