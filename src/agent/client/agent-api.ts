@@ -15,19 +15,8 @@ import type {
   ProviderSummary,
   SearchHealth,
 } from '@/agent/protocol';
-import { readDeviceId, readToken, writeDeviceId, writeToken } from '@/agent/client/token-store';
-
-/**
- * The agent service's base URL.
- *
- * Deliberately the same variable the calendar and derivatives clients read:
- * all three are served by one process, and a second variable would only be a
- * second thing to get wrong. Must be read as a static `process.env.X` property
- * for Expo to inline it.
- */
-export const AGENT_API_URL =
-  process.env.EXPO_PUBLIC_CALENDAR_API_URL ??
-  (Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000');
+import { readDeviceId, readToken, writeDeviceId, writeToken, clearToken } from '@/agent/client/token-store';
+import { getBackendUrl } from '@/lib/backend-url';
 
 /**
  * The join code, when the service is configured to want one.
@@ -65,6 +54,20 @@ const streamingFetch: typeof globalThis.fetch =
 let cachedToken: string | null = null;
 let registration: Promise<string> | null = null;
 
+/**
+ * Forget the current session so the next request registers fresh.
+ *
+ * A stored token is bound to whichever backend issued it; pointing the app at
+ * a different one (Settings → Backend) makes it foreign there, and it would
+ * otherwise be replayed as-is and rejected with 401 on every call until the
+ * app restarts. Called whenever the backend URL changes.
+ */
+export async function resetAgentSession(): Promise<void> {
+  cachedToken = null;
+  registration = null;
+  await clearToken();
+}
+
 function newDeviceId(): string {
   // A device id only needs to be unique and stable, not unguessable: it is not
   // the credential. The signed token is.
@@ -88,7 +91,7 @@ export async function ensureToken(): Promise<string> {
       deviceId = newDeviceId();
       await writeDeviceId(deviceId);
     }
-    const response = await fetch(`${AGENT_API_URL}/api/agent/auth/device`, {
+    const response = await fetch(`${getBackendUrl()}/api/agent/auth/device`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -120,9 +123,10 @@ export async function ensureToken(): Promise<string> {
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await ensureToken();
+  const base = getBackendUrl();
   let response: Response;
   try {
-    response = await fetch(`${AGENT_API_URL}${path}`, {
+    response = await fetch(`${base}${path}`, {
       ...init,
       headers: {
         accept: 'application/json',
@@ -132,11 +136,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       },
     });
   } catch {
-    throw new AgentApiError(
-      `Cannot reach the agent service at ${AGENT_API_URL}.`,
-      undefined,
-      'unreachable',
-    );
+    throw new AgentApiError(`Cannot reach the agent service at ${base}.`, undefined, 'unreachable');
   }
 
   if (response.status === 401) {
@@ -256,7 +256,7 @@ export async function* sendMessage(
 ): AsyncGenerator<AgentEvent> {
   const token = await ensureToken();
   const response = await streamingFetch(
-    `${AGENT_API_URL}/api/agent/conversations/${conversationId}/messages`,
+    `${getBackendUrl()}/api/agent/conversations/${conversationId}/messages`,
     {
       method: 'POST',
       headers: {

@@ -8,6 +8,7 @@ import {
   requestRefresh,
   CalendarApiError,
 } from '@/lib/calendar-api';
+import { useBackendUrl } from '@/lib/backend-url';
 import type { CalendarEvent, CalendarResponse } from '@/data/calendar';
 
 export type CalendarState = {
@@ -43,6 +44,9 @@ const HISTORY_STEP_DAYS = 7;
  * to polling, since React Native has no EventSource.
  */
 export function useCalendar(): CalendarState {
+  // A settings change to the backend URL means every open connection —
+  // including this stream — is pointed at the wrong host until it reopens.
+  const { url: backendUrl } = useBackendUrl();
   const [data, setData] = useState<CalendarResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -95,7 +99,7 @@ export function useCalendar(): CalendarState {
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof EventSource === 'undefined') return;
 
-    const stream = new EventSource(calendarStreamUrl);
+    const stream = new EventSource(calendarStreamUrl());
     const onPush = () => {
       setLive(true);
       void load();
@@ -110,7 +114,7 @@ export function useCalendar(): CalendarState {
       stream.removeEventListener('sync', onPush);
       stream.close();
     };
-  }, [load]);
+  }, [load, backendUrl]);
 
   // Past releases live in the service's Postgres archive, not in the live
   // window, so they are fetched on demand and kept beside it rather than

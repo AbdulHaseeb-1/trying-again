@@ -134,6 +134,14 @@ export class AiSettingsService implements OnModuleInit {
       // `null` means "leave what is stored alone"; `''` means "remove it".
       if (apiKey !== null) await this.secrets.set(providerSecretKey(providerId), apiKey);
     }
+    // Saving a real credential is how a provider goes live in the "Save
+    // credentials" flow, which never touches the separate "Enabled" switch.
+    // Without this, a key can be stored and `configured: true` while the
+    // provider stays disabled and every run keeps failing with
+    // provider_not_configured — a key entered and saved should just work.
+    if ((apiKey || rest.baseUrl) && rest.enabled === undefined) {
+      rest.enabled = true;
+    }
     const next = await this.mutate((current) => {
       const existing = current.providers[providerId] ?? defaultStoredProvider();
       return {

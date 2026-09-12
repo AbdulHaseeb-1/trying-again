@@ -27,7 +27,7 @@ import {
 import { useAgentPanel } from '@/agent';
 import { useCalendar, useNow } from '@/hooks/use-calendar';
 import { useDerivatives } from '@/hooks/use-derivatives';
-import { useAppTheme, useTheme } from '@/hooks/use-theme';
+import { useTheme } from '@/hooks/use-theme';
 
 /** The four numbers worth carrying on a screen that is mostly about the calendar. */
 function derivativeTiles(summary: AssetSummary) {
@@ -63,11 +63,9 @@ function derivativeTiles(summary: AssetSummary) {
 export default function PulseScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { fontScale, setFontScale } = useAppTheme();
   const bottomInset = useChromeInset();
   const [reminders, setReminders] = useState<string[]>([]);
   const [quickSheet, setQuickSheet] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [sessionSheetOpen, setSessionSheetOpen] = useState(false);
   const [clockSheetOpen, setClockSheetOpen] = useState(false);
 
@@ -120,7 +118,7 @@ export default function PulseScreen() {
           }
           actions={[
             { icon: 'search', label: 'Quick search', onPress: () => setQuickSheet(true) },
-            { icon: 'settings', label: 'Settings', onPress: () => setSettingsOpen(true) },
+            { icon: 'settings', label: 'Settings', onPress: () => router.push('/settings') },
           ]}
         />
 
@@ -222,48 +220,6 @@ export default function PulseScreen() {
         </View>
       </BottomSheet>
 
-      <BottomSheet visible={settingsOpen} title="Settings" onClose={() => setSettingsOpen(false)}>
-        <Tap
-          accessibilityRole="button"
-          accessibilityLabel="AI and Agents settings"
-          onPress={() => {
-            setSettingsOpen(false);
-            router.push('/settings/ai');
-          }}
-          style={[styles.settingLink, { borderColor: theme.border }]}>
-          <AppIcon name="sparkles" size={17} color={theme.primary} />
-          <View style={styles.settingLinkCopy}>
-            <ThemedText type="smallBold">AI &amp; Agents</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              Providers, models, agents, search and permissions
-            </ThemedText>
-          </View>
-          <AppIcon name="chevron" size={14} color={theme.textMuted} />
-        </Tap>
-        <View style={styles.settingGroup}>
-          <ThemedText type="smallBold">Font size</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">Choose the reading size that feels best.</ThemedText>
-          <View style={styles.fontOptions}>
-            {([
-              ['Compact', 0.9],
-              ['Standard', 1],
-              ['Large', 1.1],
-            ] as const).map(([label, scale]) => {
-              const selected = fontScale === scale;
-              return (
-                <Tap
-                  key={label}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                  onPress={() => setFontScale(scale)}
-                  style={[styles.fontOption, { borderColor: selected ? theme.primary : theme.border }]}>
-                  <ThemedText type="smallBold" style={{ color: selected ? theme.primary : theme.textSecondary }}>{label}</ThemedText>
-                </Tap>
-              );
-            })}
-          </View>
-        </View>
-      </BottomSheet>
       <SessionVariantSheet
         visible={sessionSheetOpen}
         onClose={() => setSessionSheetOpen(false)}
@@ -292,18 +248,4 @@ const styles = StyleSheet.create({
   sheetRow: { minHeight: 46, flexDirection: 'row', alignItems: 'center', gap: Spacing.three, borderBottomWidth: StyleSheet.hairlineWidth },
   sheetName: { flex: 1 },
   sheetSymbol: { width: 40, fontWeight: '700' },
-  settingLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-    minHeight: 52,
-    paddingHorizontal: Spacing.four,
-    marginBottom: Spacing.four,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: Radius.md,
-  },
-  settingLinkCopy: { flex: 1, gap: 1 },
-  settingGroup: { gap: Spacing.two },
-  fontOptions: { flexDirection: 'row', gap: Spacing.two, marginTop: Spacing.two },
-  fontOption: { flex: 1, minHeight: 40, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: Radius.md },
 });

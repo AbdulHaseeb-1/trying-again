@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "MarketPulse",
-    "slug": "trying-again",
+    "slug": "try-again",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/marketpulse-icon.png",
@@ -11,6 +11,7 @@
       "icon": "./assets/images/marketpulse-icon.png"
     },
     "android": {
+      "package": "com.marketpulse.app",
       "adaptiveIcon": {
         "backgroundColor": "#0B0B0C",
         "foregroundImage": "./assets/images/marketpulse-splash.png"
@@ -41,6 +42,19 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "04228565-1f48-4a17-bbf6-50edff84ba8c"
+      }
+    },
+    "owner": "abdulhaseeb600s-organization",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/04228565-1f48-4a17-bbf6-50edff84ba8c"
     }
   }
 }

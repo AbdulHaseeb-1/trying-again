@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BackHandler,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -26,6 +27,7 @@ import Animated, {
 import { useRouter } from 'expo-router';
 
 import { ThemedText } from '@/components/themed-text';
+import { trackSheetOpen } from '@/components/sheet-visibility';
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { AgentMessageReference } from '@/agent/protocol';
@@ -422,54 +424,85 @@ function SheetPanel() {
 
   const dragStyle = useAnimatedStyle(() => ({ transform: [{ translateY: dragY.value }] }));
 
+  // The panel is mounted only while `store.visible` is true (see `AgentPanel`
+  // above), so tracking for exactly this component's lifetime is tracking for
+  // exactly the sheet's open duration — no separate visible flag to thread through.
+  useEffect(() => trackSheetOpen(), []);
+
+  // Android's `Modal` opens a second native window on top of the Activity's
+  // own — which is where the floating tab bar lives, absolutely positioned
+  // with its own elevation. The two windows don't always agree on stacking or
+  // on how much of the screen the keyboard inset covers, which is what shows
+  // up as a flash of the (transparent) Activity window behind the sheet,
+  // worst around the composer when the keyboard opens or closes. Rendering
+  // the sheet in-tree instead — a plain absolute-fill View, later in paint
+  // order than the tab bar — sidesteps the second window entirely. `BottomSheet`
+  // takes the same approach for the same reason.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      close();
+      return true;
+    });
+    return () => sub.remove();
+  }, [close]);
+
+  const content = (
+    <Animated.View
+      entering={reduceMotion ? undefined : FadeIn.duration(AgentMotion.enter)}
+      exiting={reduceMotion ? undefined : FadeOut.duration(AgentMotion.exit)}
+      style={styles.sheetRoot}>
+      {/* Distinct from the header's close control: two buttons with the same
+          name is ambiguous to a screen reader and to anything else reading
+          the accessibility tree. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Dismiss the assistant"
+        onPress={close}
+        style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
+      />
+      <Animated.View
+        testID="agent-panel-sheet"
+        entering={
+          reduceMotion ? undefined : SlideInDown.springify().damping(26).stiffness(250).mass(0.7)
+        }
+        exiting={reduceMotion ? undefined : SlideOutDown.duration(AgentMotion.exit)}
+        style={[
+          styles.sheet,
+          dragStyle,
+          {
+            backgroundColor: theme.background,
+            borderTopColor: theme.border,
+            marginTop: Math.max(insets.top, Spacing.five),
+          },
+        ]}>
+        <KeyboardAvoidingView
+          style={styles.flex}
+          // The composer must ride the keyboard, and the two platforms need
+          // different behaviours to do it without a gap or an overlap.
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}>
+          <GestureDetector gesture={pan}>
+            <View collapsable={false} style={styles.grabberArea}>
+              <View style={[styles.grabber, { backgroundColor: theme.borderStrong }]} />
+            </View>
+          </GestureDetector>
+
+          <PanelChrome view={view} onClose={close} />
+
+          <View style={[{ height: Math.max(insets.bottom, Spacing.three) }, { backgroundColor: theme.background }]} />
+        </KeyboardAvoidingView>
+      </Animated.View>
+    </Animated.View>
+  );
+
+  if (Platform.OS === 'android') {
+    return <View style={styles.androidRoot}>{content}</View>;
+  }
+
   return (
     <Modal visible transparent animationType="none" onRequestClose={close} statusBarTranslucent>
-      <Animated.View
-        entering={reduceMotion ? undefined : FadeIn.duration(AgentMotion.enter)}
-        exiting={reduceMotion ? undefined : FadeOut.duration(AgentMotion.exit)}
-        style={styles.sheetRoot}>
-        {/* Distinct from the header's close control: two buttons with the same
-            name is ambiguous to a screen reader and to anything else reading
-            the accessibility tree. */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss the assistant"
-          onPress={close}
-          style={[StyleSheet.absoluteFill, { backgroundColor: theme.overlay }]}
-        />
-        <Animated.View
-          testID="agent-panel-sheet"
-          entering={
-            reduceMotion ? undefined : SlideInDown.springify().damping(26).stiffness(250).mass(0.7)
-          }
-          exiting={reduceMotion ? undefined : SlideOutDown.duration(AgentMotion.exit)}
-          style={[
-            styles.sheet,
-            dragStyle,
-            {
-              backgroundColor: theme.background,
-              borderTopColor: theme.border,
-              marginTop: Math.max(insets.top, Spacing.five),
-            },
-          ]}>
-          <KeyboardAvoidingView
-            style={styles.flex}
-            // The composer must ride the keyboard, and the two platforms need
-            // different behaviours to do it without a gap or an overlap.
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={0}>
-            <GestureDetector gesture={pan}>
-              <View collapsable={false} style={styles.grabberArea}>
-                <View style={[styles.grabber, { backgroundColor: theme.borderStrong }]} />
-              </View>
-            </GestureDetector>
-
-            <PanelChrome view={view} onClose={close} />
-
-            <View style={{ height: Math.max(insets.bottom, Spacing.three) }} />
-          </KeyboardAvoidingView>
-        </Animated.View>
-      </Animated.View>
+      {content}
     </Modal>
   );
 }
@@ -489,6 +522,7 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
   resizeGrip: { width: 3, height: 44, borderRadius: Radius.full },
+  androidRoot: { ...StyleSheet.absoluteFill, zIndex: 70, elevation: 70 },
   sheetRoot: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
     flex: 1,

@@ -17,6 +17,7 @@
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.2",
     "expo-system-ui": "~57.0.3",
+    "expo-updates": "~57.0.22",
     "expo-web-browser": "~57.0.2",
     "marked": "^16.4.2",
     "react": "19.2.3",
@@ -51,15 +52,9 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-<<<<<<< HEAD
-    "dev": "concurrently \"npm run dev:server\" \"npm run start:lan\"",
-    "dev:server": "cd server && npm run dev",
-    "detect:lan": "node ./scripts/detect-lan-ip.js"
-=======
     "test": "node --test --import tsx \"src/**/*.test.ts\"",
     "test:e2e": "npm run build:e2e && playwright test",
     "build:e2e": "npm --prefix server run build && EXPO_PUBLIC_CALENDAR_API_URL=http://127.0.0.1:4021 expo export -p web"
->>>>>>> 243791a356505cace33435fd1d79d915266fb21b
   },
   "private": true
 }

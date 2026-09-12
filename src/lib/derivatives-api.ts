@@ -1,18 +1,5 @@
-import { Platform } from 'react-native';
-
+import { getBackendUrl } from '@/lib/backend-url';
 import type { DerivativesResponse, LiquidityMapResponse } from '@/data/derivatives';
-
-/**
- * Base URL of the market-data service.
- *
- * Set EXPO_PUBLIC_CALENDAR_API_URL for devices and deployments — the
- * derivatives and calendar APIs are served by the same process. Must be read
- * as a static `process.env.X` property for Expo to inline it.
- */
-export const DERIVATIVES_API_URL =
-  process.env.EXPO_PUBLIC_CALENDAR_API_URL ??
-  // The Android emulator maps the host loopback to 10.0.2.2.
-  (Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000');
 
 export class DerivativesApiError extends Error {
   constructor(message: string, readonly status?: number) {
@@ -22,7 +9,8 @@ export class DerivativesApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${DERIVATIVES_API_URL}${path}`;
+  const base = getBackendUrl();
+  const url = `${base}${path}`;
   let response: Response;
   try {
     response = await fetch(url, {
@@ -33,7 +21,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // A network-level failure here almost always means the service is not up,
     // so say that rather than surfacing a bare "Failed to fetch".
     throw new DerivativesApiError(
-      `Cannot reach the derivatives service at ${DERIVATIVES_API_URL}. ${
+      `Cannot reach the derivatives service at ${base}. ${
         error instanceof Error ? error.message : ''
       }`.trim(),
     );
@@ -66,4 +54,6 @@ export function requestDerivativesRefresh(signal?: AbortSignal): Promise<unknown
   return request('/api/derivatives/refresh', { method: 'POST', signal });
 }
 
-export const derivativesStreamUrl = `${DERIVATIVES_API_URL}/api/derivatives/stream`;
+export function derivativesStreamUrl(): string {
+  return `${getBackendUrl()}/api/derivatives/stream`;
+}

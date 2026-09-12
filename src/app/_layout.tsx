@@ -29,6 +29,7 @@ export default function RootLayout() {
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen name="asset/[symbol]" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="event/[id]" options={{ animation: 'slide_from_right' }} />
+                <Stack.Screen name="settings/index" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="settings/ai/index" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="settings/ai/providers" options={{ animation: 'slide_from_right' }} />
                 <Stack.Screen name="settings/ai/provider/[id]" options={{ animation: 'slide_from_right' }} />

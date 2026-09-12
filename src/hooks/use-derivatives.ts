@@ -8,6 +8,7 @@ import {
   fetchDerivatives,
   requestDerivativesRefresh,
 } from '@/lib/derivatives-api';
+import { useBackendUrl } from '@/lib/backend-url';
 
 export type DerivativesState = {
   data: DerivativesResponse | null;
@@ -33,6 +34,7 @@ const DEFAULT_POLL_MS = 60_000;
  * either way, and blanking it would make a tap feel like a reload.
  */
 export function useDerivatives(symbol: string | null): DerivativesState {
+  const { url: backendUrl } = useBackendUrl();
   const [data, setData] = useState<DerivativesResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -87,7 +89,7 @@ export function useDerivatives(symbol: string | null): DerivativesState {
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof EventSource === 'undefined') return;
 
-    const stream = new EventSource(derivativesStreamUrl);
+    const stream = new EventSource(derivativesStreamUrl());
     const onPush = () => {
       setLive(true);
       void load();
@@ -100,7 +102,7 @@ export function useDerivatives(symbol: string | null): DerivativesState {
       stream.removeEventListener('sync', onPush);
       stream.close();
     };
-  }, [load]);
+  }, [load, backendUrl]);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
